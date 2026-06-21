@@ -34,11 +34,11 @@ Wave :: struct {
 game_init :: proc(difficulty: Difficulty) -> Session {
 	settings := set_difficulty(difficulty)
 	waves := [5]Wave {
-		{spawn_multiplier = 1.0, speed_multiplier = 1.0, duration = 10},
-		{spawn_multiplier = 0.8, speed_multiplier = 1.5, duration = 10},
-		{spawn_multiplier = 0.8, speed_multiplier = 1.5, duration = 20},
-		{spawn_multiplier = 0.8, speed_multiplier = 1.5, duration = 20},
-		{spawn_multiplier = 0.8, speed_multiplier = 1.5, duration = 20},
+		{spawn_multiplier = 1.0, speed_multiplier = 1.0, duration = 30},
+		{spawn_multiplier = 0.8, speed_multiplier = 1.2, duration = 30},
+		{spawn_multiplier = 0.8, speed_multiplier = 1.2, duration = 60},
+		{spawn_multiplier = 0.8, speed_multiplier = 1.2, duration = 60},
+		{spawn_multiplier = 0.8, speed_multiplier = 1.2, duration = 60},
 	}
 
 	return Session {
@@ -101,39 +101,48 @@ item_pool_update :: proc(
 ) {
 	screen := k2.get_screen_size()
 	for &item in item_pool.items {
-		if !item.active do continue
+		// TODO: Extract into item_update
+		switch item.state {
+		case .Inactive:
+			continue
+		case .Falling:
+			item.y += item.speed * dt
 
-		item.y += item.speed * dt
+			// Item leaves
+			if item.y + item.height / 2 > screen.y {
+				item_remove(item_pool, &item)
+				if _, ok := item.type.(GoodItemDef); ok {
+					lives_delta -= 1
+				}
+			}
 
-		// Item leaves
-		if item.y + item.height / 2 > screen.y {
-			item_remove(item_pool, &item)
-			if _, ok := item.type.(GoodItemDef); ok {
-				lives_delta -= 1
+			// Item caught
+			switch def in item.type {
+			case GoodItemDef:
+				if (has_collision(player, item, good_catch_margin)) {
+					// TODO: We should pass something closer to collision's x,y
+					floating_text_spawn(
+						floating_text_pool,
+						player.x + player.width / 2,
+						player.y - 10,
+						fmt.tprintf("+%d", def.points),
+					)
+					item_remove(item_pool, &item)
+					score_delta += def.points
+				}
+			case BadItemDef:
+				if (has_collision(player, item)) {
+					item_remove(item_pool, &item)
+					lives_delta -= 1
+				}
+			}
+
+		case .Flashing:
+			item.flashing_elapsed += dt
+			if item.flashing_elapsed > FLASHING_LIFETIME {
+				item.state = .Inactive
 			}
 		}
-
-		// Item caught
-		switch def in item.type {
-		case GoodItemDef:
-			if (has_collision(player, item, good_catch_margin)) {
-				// TODO: We should pass something closer to collision's x,y
-				floating_text_spawn(
-					floating_text_pool,
-					player.x + player.width / 2,
-					player.y - 10,
-					fmt.tprintf("+%d", def.points),
-				)
-				item_remove(item_pool, &item)
-				score_delta += def.points
-			}
-		case BadItemDef:
-			if (has_collision(player, item)) {
-				item_remove(item_pool, &item)
-				lives_delta -= 1
-			}
-		}
-
 
 		item_draw(item)
 		effects_draw(floating_text_pool)
@@ -149,12 +158,6 @@ has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 		item.y - margin < player.y + player.height &&
 		item.y + item.height + margin > player.y \
 	)
-}
-
-// TODO: Not cleaned (need proper pool and reuse later?)
-item_remove :: proc(pool: ^ItemPool, item: ^Item) {
-	item.active = false
-	pool.currently_active -= 1
 }
 
 game_draw :: proc(session: Session) {

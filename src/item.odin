@@ -37,12 +37,23 @@ ItemDef :: union {
 	BadItemDef,
 }
 
+FLASHING_LIFETIME: f32 : 0.3
+FLASHING_SPEED: f32 : 10
+
+ItemState :: enum {
+	Inactive,
+	Falling,
+	Flashing,
+}
+
 Item :: struct {
-	x, y:          f32,
-	width, height: f32,
-	speed:         f32,
-	active:        bool,
-	type:          ItemDef,
+	x, y:             f32,
+	width, height:    f32,
+	speed:            f32,
+	type:             ItemDef,
+	state:            ItemState,
+	// for the Flashing state
+	flashing_elapsed: f32,
 }
 
 good_item_defs := []GoodItemDef {
@@ -72,8 +83,9 @@ item_init :: proc(screen_x: f32, speed: f32) -> Item {
 		width = ITEM_WIDTH,
 		height = ITEM_HEIGHT,
 		speed = speed,
-		active = true,
 		type = type,
+		state = .Falling,
+		flashing_elapsed = 0,
 	}
 }
 
@@ -114,33 +126,47 @@ item_draw :: proc(item: Item) {
 		h = item.height,
 	}
 
-	// TODO: How to properly pattern match on kind?
+	switch item.state {
+	case .Inactive:
+		break
+	case .Falling:
+		k2.draw_rect(test_box, get_item_color(item))
+	case .Flashing:
+		flashing := int(item.flashing_elapsed * FLASHING_SPEED) % 2 == 0
+		color := k2.WHITE if flashing else get_item_color(item)
+		k2.draw_rect(test_box, color)
+	}
+}
+
+// TODO: How to properly pattern match on kind?
+get_item_color :: proc(item: Item) -> k2.Color {
 	switch def in item.type {
 	case GoodItemDef:
 		switch def.kind {
 		case .Normal:
-			k2.draw_rect(test_box, k2.GREEN)
+			return k2.GREEN
 		case .Call:
-			k2.draw_rect(test_box, k2.GREEN)
+			return k2.GREEN
 		case .Faang:
-			k2.draw_rect(test_box, k2.PURPLE)
+			return k2.PURPLE
 		case .FireStack:
-			k2.draw_rect(test_box, k2.PURPLE)
+			return k2.PURPLE
 		case .BigMoney:
-			k2.draw_rect(test_box, k2.PURPLE)
+			return k2.PURPLE
 		case .Remote:
-			k2.draw_rect(test_box, k2.PURPLE)
+			return k2.PURPLE
 		}
 	case BadItemDef:
 		switch def.kind {
 		case .Rejection:
-			k2.draw_rect(test_box, k2.RED)
+			return k2.RED
 		case .Ignore:
-			k2.draw_rect(test_box, k2.RED)
+			return k2.RED
 		case .NightmareStack:
-			k2.draw_rect(test_box, k2.DARK_RED)
+			return k2.DARK_RED
 		}
 	}
+	return k2.WHITE // :shrug:
 }
 
 ITEM_SPAWN_TIMER: f32 : 0.5
@@ -177,7 +203,7 @@ item_pool_spawn :: proc(item_pool: ^ItemPool, screen_x: f32, dt: f32) {
 			found := false
 			// re-use a spot
 			for &item in item_pool.items {
-				if !item.active {
+				if item.state == .Inactive {
 					item = item_init(screen_x, item_pool.setting_item_speed)
 					found = true
 					break
@@ -191,6 +217,13 @@ item_pool_spawn :: proc(item_pool: ^ItemPool, screen_x: f32, dt: f32) {
 			item_pool.currently_active += 1
 		}
 	}
+}
+
+// TODO: Not cleaned (need proper pool and reuse later?)
+item_remove :: proc(pool: ^ItemPool, item: ^Item) {
+	item.state = .Flashing
+	// item.active = false
+	pool.currently_active -= 1
 }
 
 item_pool_next_wave :: proc(item_pool: ^ItemPool, spawn_multiplier: f32, speed_multiplier: f32) {

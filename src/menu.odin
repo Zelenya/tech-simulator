@@ -89,7 +89,7 @@ set_difficulty :: proc(chosen: Difficulty) -> DifficultySettings {
 	case .Easy:
 		return DifficultySettings {
 			spawn_interval = 0.7,
-			item_speed = 300,
+			item_speed = 250,
 			max_active = 2,
 			lives = 5,
 		}
