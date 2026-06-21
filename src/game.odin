@@ -155,11 +155,11 @@ has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 	)
 }
 
-game_draw :: proc(session: Session) {
+game_draw :: proc(session: Session, textures: Textures) {
 	screen := k2.get_screen_size()
 
-	player_draw(session.player)
-	for &item in session.item_pool.items do item_draw(item)
+	player_draw(session.player, textures.player)
+	for &item in session.item_pool.items do item_draw(item, textures)
 	effects_draw(session.effects)
 
 	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 100, 10}, 20, k2.GRAY)

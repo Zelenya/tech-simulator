@@ -3,8 +3,8 @@ package game
 import k2 "../karl2d"
 import "core:math/rand"
 
-ITEM_WIDTH: f32 : 100
-ITEM_HEIGHT: f32 : 100
+ITEM_WIDTH: f32 : 32 * 2
+ITEM_HEIGHT: f32 : 32 * 2
 
 GoodKind :: enum {
 	Normal,
@@ -118,53 +118,77 @@ pick_weighted_bad :: proc() -> BadItemDef {
 	return bad_item_defs[0] // just in case
 }
 
-item_draw :: proc(item: Item) {
-	test_box := k2.Rect {
+item_draw :: proc(item: Item, textures: Textures) {
+	item_box := k2.Rect {
 		x = item.x,
 		y = item.y,
 		w = item.width,
 		h = item.height,
 	}
 
-	switch item.state {
-	case .Inactive:
-		break
-	case .Falling:
-		k2.draw_rect(test_box, get_item_color(item))
-	case .Flashing:
-		flashing := int(item.flashing_elapsed * FLASHING_SPEED) % 2 == 0
-		color := k2.WHITE if flashing else get_item_color(item)
-		k2.draw_rect(test_box, color)
-	}
-}
-
-// TODO: How to properly pattern match on kind?
-get_item_color :: proc(item: Item) -> k2.Color {
+	// TODO: Is there a better way to pattern match on kind?
+	// TODO: Fill those out and move?
+	texture: k2.Texture
 	switch def in item.type {
 	case GoodItemDef:
 		switch def.kind {
 		case .Normal:
-			return k2.GREEN
+			texture = textures.item_good
 		case .Call:
-			return k2.GREEN
+			texture = textures.item_good_call
 		case .Faang:
-			return k2.PURPLE
+			fallthrough
 		case .FireStack:
-			return k2.PURPLE
+			fallthrough
 		case .BigMoney:
-			return k2.PURPLE
+			fallthrough
 		case .Remote:
-			return k2.PURPLE
+			texture = textures.item_good
 		}
 	case BadItemDef:
 		switch def.kind {
 		case .Rejection:
-			return k2.RED
+			fallthrough
 		case .Ignore:
-			return k2.RED
+			fallthrough
 		case .NightmareStack:
-			return k2.DARK_RED
+			texture = textures.item_bad
 		}
+	}
+
+	switch item.state {
+	case .Inactive:
+		break
+	case .Falling:
+		k2.draw_texture_fit(texture, k2.get_texture_rect(texture), item_box)
+		// TODO: This only works with squares, what about circles?
+		k2.draw_rect_outline(item_box, 3, get_item_color(item))
+	case .Flashing:
+		flashing := int(item.flashing_elapsed * FLASHING_SPEED) % 2 == 0
+		if flashing {
+			k2.draw_texture_fit(texture, k2.get_texture_rect(texture), item_box)
+			// TODO: This only works with squares, what about circles?
+			k2.draw_rect_outline(item_box, 3, get_item_color(item))
+		} else {
+			// TODO: This only works with squares, what about circles?
+			k2.draw_rect(item_box, k2.WHITE)
+		}
+	}
+}
+
+// TODO: How to properly pattern match on kind?
+// TODO: Special color for "selected" items, this is just for testing
+get_item_color :: proc(item: Item) -> k2.Color {
+	switch def in item.type {
+	case GoodItemDef:
+		switch def.kind {
+		case .Normal, .Call:
+			return k2.GREEN
+		case .Faang, .FireStack, .BigMoney, .Remote:
+			return k2.PURPLE
+		}
+	case BadItemDef:
+		return k2.RED
 	}
 	return k2.WHITE // :shrug:
 }

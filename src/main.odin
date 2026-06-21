@@ -4,7 +4,7 @@ import k2 "../karl2d"
 
 main :: proc() {
 	k2.init(1280, 720, "Greetings from Karl2D!")
-
+	textures := textures_init()
 	game_state := GameState.Title
 	// TODO: Should this be cleaned when the game starts?
 	menu := menu_init()
@@ -31,7 +31,7 @@ main :: proc() {
 				modifier_options = modifier_pick_init(session)
 			}
 			game_state = next_state
-			game_draw(session)
+			game_draw(session, textures)
 			effects_reset(session.effects)
 		case .ModifierPick:
 			game_state = modifier_pick_update(&session, &modifier_options, dt)
