@@ -32,6 +32,7 @@ main :: proc() {
 			}
 			game_state = next_state
 			game_draw(session)
+			effects_reset(session.effects)
 		case .ModifierPick:
 			game_state = modifier_pick_update(&session, &modifier_options, dt)
 			modifier_pick_draw(modifier_options)

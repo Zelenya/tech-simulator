@@ -11,18 +11,17 @@ GameState :: enum {
 }
 
 Session :: struct {
-	player:             Player,
-	item_pool:          ItemPool,
-	// TODO: Needs to have a better pool
-	floating_text_pool: [16]FloatingText,
-	score:              u32,
+	player:            Player,
+	item_pool:         ItemPool,
+	effects:           Effects,
+	score:             u32,
 	// just in case we go below 0
-	lives:              i8,
-	current_wave:       u8,
-	wave_timer:         f32,
-	waves:              [5]Wave,
+	lives:             i8,
+	current_wave:      u8,
+	wave_timer:        f32,
+	waves:             [5]Wave,
 	// to be more forgiving and flexible with good catches
-	good_catch_margin:  f32,
+	good_catch_margin: f32,
 }
 
 Wave :: struct {
@@ -42,20 +41,20 @@ game_init :: proc(difficulty: Difficulty) -> Session {
 	}
 
 	return Session {
-		player             = player_init(),
-		item_pool          = item_pool_init(
+		player            = player_init(),
+		item_pool         = item_pool_init(
 			settings.max_active,
 			settings.item_speed,
 			settings.spawn_interval,
 		),
-		floating_text_pool = floating_text_init(),
-		score              = 0,
-		lives              = cast(i8)settings.lives,
-		current_wave       = 0,
-		wave_timer         = 0,
-		waves              = waves,
-		// TODO: Make it part of difficulty too?
-		good_catch_margin  = 0,
+		effects           = effects_init(),
+		score             = 0,
+		lives             = cast(i8)settings.lives,
+		current_wave      = 0,
+		wave_timer        = 0,
+		waves             = waves,
+		// TODO: Make it part of the difficulty too?
+		good_catch_margin = 0,
 	}
 }
 
@@ -70,28 +69,26 @@ game_update :: proc(session: ^Session, dt: f32) -> GameState {
 	}
 
 	player_update(&session.player, dt)
-	floating_text_pool_update(&session.floating_text_pool, dt)
-	player_draw(session.player)
-
 	item_pool_spawn(&session.item_pool, screen.x, dt)
 	score_delta, lives_delta := item_pool_update(
 		&session.item_pool,
-		&session.floating_text_pool,
+		&session.effects,
 		session.player,
 		good_catch_margin = session.good_catch_margin,
 		dt = dt,
 	)
+	effects_update(&session.effects, dt)
 	session.score += score_delta
 	session.lives += lives_delta
 
 	if session.lives <= 0 {return .GameOver} else {return .Playing}
 }
 
-// TODO: This doesn't feel right, this should be split by "domain"
+// TODO: This doesn't feel right, this should be inline and/or split by "domain"
 // TODO: With effects even worse now, need to refactor
 item_pool_update :: proc(
 	item_pool: ^ItemPool,
-	floating_text_pool: ^[16]FloatingText,
+	effects: ^Effects,
 	player: Player,
 	good_catch_margin: f32,
 	dt: f32,
@@ -122,7 +119,7 @@ item_pool_update :: proc(
 				if (has_collision(player, item, good_catch_margin)) {
 					// TODO: We should pass something closer to collision's x,y
 					floating_text_spawn(
-						floating_text_pool,
+						&effects.floating_texts,
 						player.x + player.width / 2,
 						player.y - 10,
 						fmt.tprintf("+%d", def.points),
@@ -133,6 +130,7 @@ item_pool_update :: proc(
 			case BadItemDef:
 				if (has_collision(player, item)) {
 					item_remove(item_pool, &item)
+					effects.shake_is_active = true
 					lives_delta -= 1
 				}
 			}
@@ -143,9 +141,6 @@ item_pool_update :: proc(
 				item.state = .Inactive
 			}
 		}
-
-		item_draw(item)
-		effects_draw(floating_text_pool)
 	}
 	return score_delta, lives_delta
 }
@@ -162,6 +157,10 @@ has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 
 game_draw :: proc(session: Session) {
 	screen := k2.get_screen_size()
+
+	player_draw(session.player)
+	for &item in session.item_pool.items do item_draw(item)
+	effects_draw(session.effects)
 
 	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 100, 10}, 20, k2.GRAY)
 	k2.draw_text(fmt.tprintf("Lives: %d", session.lives), {screen.x - 100, 30}, 20, k2.GRAY)

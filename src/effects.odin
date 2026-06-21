@@ -1,7 +1,36 @@
 package game
 
 import k2 "../karl2d"
-// import "core:fmt"
+import "core:math/rand"
+
+Effects :: struct {
+	shake_is_active: bool,
+	shake_elapsed:   f32,
+	floating_texts:  [16]FloatingText,
+}
+
+// TODO: Also needs better pools
+effects_init :: proc() -> Effects {
+	empty: [16]FloatingText
+	return Effects{shake_is_active = false, shake_elapsed = 0, floating_texts = empty}
+}
+
+effects_update :: proc(effects: ^Effects, dt: f32) {
+	floating_text_pool_update(&effects.floating_texts, dt)
+	shake_update(effects, dt)
+}
+
+effects_reset :: proc(effects: Effects) {
+	if effects.shake_is_active {
+		k2.set_camera(nil)
+	}
+}
+
+effects_draw :: proc(effects: Effects) {
+	for text in effects.floating_texts {
+		if text.active do floating_text_draw(text)
+	}
+}
 
 FLOATING_TEXT_LIFETIME: f32 : 1
 
@@ -13,11 +42,6 @@ FloatingText :: struct {
 	active:  bool,
 }
 
-// TODO: Also needs better pools
-floating_text_init :: proc() -> [16]FloatingText {
-	empty: [16]FloatingText
-	return empty
-}
 
 // TODO: Currently, if we get more than 16 notifications, we won't show anything (ok for now)
 floating_text_pool_update :: proc(floating_text_pool: ^[16]FloatingText, dt: f32) {
@@ -55,9 +79,31 @@ floating_text_draw :: proc(floating_text: FloatingText) {
 	k2.draw_text(floating_text.text, {text_x, floating_text.y}, 20, faded_green)
 }
 
-// This name is half generalized, so I don't forget what I want later
-effects_draw :: proc(floating_text_pool: ^[16]FloatingText) {
-	for text in floating_text_pool {
-		if text.active do floating_text_draw(text)
+SHAKE_DURATION: f32 : 0.5
+SHAKE_STRENGTH: f32 : 10
+
+shake_update :: proc(effects: ^Effects, dt: f32) {
+	if effects.shake_is_active {
+		effects.shake_elapsed += dt
+		if effects.shake_elapsed >= SHAKE_DURATION {
+			effects.shake_is_active = false
+			effects.shake_elapsed = 0
+		}
+
+		offset := shake_offset(effects^)
+		camera := k2.Camera {
+			target   = offset,
+			offset   = {0, 0},
+			rotation = 0,
+			zoom     = 1,
+		}
+		k2.set_camera(camera)
 	}
+}
+
+shake_offset :: proc(effects: Effects) -> k2.Vec2 {
+	if !effects.shake_is_active do return {0, 0}
+	t := effects.shake_elapsed / SHAKE_DURATION
+	strength := SHAKE_STRENGTH * (1.0 - t)
+	return {rand.float32_range(-strength, strength), rand.float32_range(-strength, strength)}
 }
