@@ -91,13 +91,7 @@ shake_update :: proc(effects: ^Effects, dt: f32) {
 		}
 
 		offset := shake_offset(effects^)
-		camera := k2.Camera {
-			target   = offset,
-			offset   = {0, 0},
-			rotation = 0,
-			zoom     = 1,
-		}
-		k2.set_camera(camera)
+		set_game_camera(offset)
 	}
 }
 

@@ -15,7 +15,7 @@ Player :: struct {
 }
 
 player_init :: proc() -> Player {
-	screen := k2.get_screen_size()
+	screen := game_screen_size()
 	return Player {
 		x = screen.x / 2 - PLAYER_WIDTH / 2,
 		y = screen.y - PLAYER_HEIGHT - 8,
@@ -25,8 +25,8 @@ player_init :: proc() -> Player {
 }
 
 player_update :: proc(player: ^Player, dt: f32) {
-	screen := k2.get_screen_size()
-	mouse := k2.get_mouse_position()
+	screen := game_screen_size()
+	mouse := game_mouse_position()
 	mouse_delta := k2.get_mouse_delta()
 	if mouse_delta.x != 0 do player.x = mouse.x - PLAYER_WIDTH / 2
 	if k2.key_is_held(.Left) do player.x -= PLAYER_SPEED * dt

@@ -23,7 +23,7 @@ DifficutlyCard :: struct {
 }
 
 menu_init :: proc() -> Menu {
-	screen := k2.get_screen_size()
+	screen := game_screen_size()
 
 	total_width := CARD_WIDTH * 3 + CARD_GAP * 2
 	start_x := screen.x / 2 - total_width / 2
@@ -64,7 +64,7 @@ menu_update :: proc(menu: ^Menu, dt: f32) -> GameState {
 	if k2.key_went_down(.Right) do menu.selected += 1
 	menu.selected = clamp(menu.selected, 0, len(Difficulty))
 
-	mouse := k2.get_mouse_position()
+	mouse := game_mouse_position()
 	for difficulty, i in menu.difficulty_cards {
 		if is_inside(difficulty.card, mouse) do menu.selected = int(i)
 	}

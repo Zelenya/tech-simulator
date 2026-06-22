@@ -12,7 +12,7 @@ gameover_update :: proc() -> GameState {
 }
 
 gameover_draw :: proc(session: Session) {
-	screen := k2.get_screen_size()
+	screen := game_screen_size()
 
 	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 100, 10}, 20, k2.GRAY)
 	k2.draw_text(fmt.tprintf("Lives: %d", session.lives), {screen.x - 100, 30}, 20, k2.GRAY)

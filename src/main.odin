@@ -3,7 +3,7 @@ package game
 import k2 "../karl2d"
 
 main :: proc() {
-	k2.init(1280, 720, "Greetings from Karl2D!")
+	k2.init(WINDOW_WIDTH, WINDOW_HEIGHT, "Greetings!")
 	textures := textures_init()
 	game_state := GameState.Title
 	// TODO: Should this be cleaned when the game starts?
@@ -15,6 +15,7 @@ main :: proc() {
 	for k2.update() {
 		dt := k2.get_frame_time()
 		k2.clear(k2.LIGHT_BLUE)
+		set_game_camera()
 
 		switch game_state {
 		case .Title:

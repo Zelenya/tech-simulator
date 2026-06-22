@@ -59,7 +59,7 @@ game_init :: proc(difficulty: Difficulty) -> Session {
 }
 
 game_update :: proc(session: ^Session, dt: f32) -> GameState {
-	screen := k2.get_screen_size()
+	screen := game_screen_size()
 
 	session.wave_timer += dt
 	// Make progress (clamp it to X waves to be reasonable... for now)
@@ -96,7 +96,7 @@ item_pool_update :: proc(
 	score_delta: u32,
 	lives_delta: i8,
 ) {
-	screen := k2.get_screen_size()
+	screen := game_screen_size()
 	for &item in item_pool.items {
 		// TODO: Extract into item_update
 		switch item.state {
@@ -156,7 +156,7 @@ has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 }
 
 game_draw :: proc(session: Session, textures: Textures) {
-	screen := k2.get_screen_size()
+	screen := game_screen_size()
 
 	player_draw(session.player, textures.player)
 	for &item in session.item_pool.items do item_draw(item, textures)

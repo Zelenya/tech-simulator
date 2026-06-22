@@ -67,7 +67,7 @@ ModifierCard :: struct {
 }
 
 modifier_pick_init :: proc(session: Session) -> ModifierOptions {
-	screen := k2.get_screen_size()
+	screen := game_screen_size()
 
 	total_width := MOD_CARD_WIDTH * 3 + MOD_CARD_GAP * 2
 	start_x := screen.x / 2 - total_width / 2
@@ -102,7 +102,7 @@ modifier_pick_update :: proc(
 	if k2.key_went_down(.Right) do modifier_options.selected += 1
 	modifier_options.selected = clamp(modifier_options.selected, 0, len(Difficulty))
 
-	mouse := k2.get_mouse_position()
+	mouse := game_mouse_position()
 	for option, i in modifier_options.options {
 		if is_inside(option.card, mouse) do modifier_options.selected = int(i)
 	}
