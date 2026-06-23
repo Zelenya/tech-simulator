@@ -1,0 +1,119 @@
+{
+  "cards": {
+    "width": 225,
+    "height": 400,
+    "gap": 50
+  },
+  "effects": {
+    "flashing_lifetime": 0.3,
+    "flashing_speed": 10
+  },
+  "item_pool": {
+    "good_to_bad_ratio": 0.6
+  },
+  "items": [
+    {
+      "kind": "normal",
+      "sprite": "test-item-good-normal",
+      "shape": "rect",
+      "width": 64,
+      "height": 64,
+      "weight": 5,
+      "is_good": true,
+      "points": 100
+    },
+    {
+      "kind": "call",
+      "sprite": "test-item-good-call",
+      "shape": "circle",
+      "width": 64,
+      "height": 64,
+      "weight": 5,
+      "is_good": true,
+      "points": 200
+    },
+    {
+      "kind": "faang",
+      "sprite": "test-item-good-normal",
+      "shape": "rect",
+      "width": 64,
+      "height": 64,
+      "weight": 1,
+      "is_good": true,
+      "points": 300
+    },
+    {
+      "kind": "fire-stack",
+      "sprite": "test-item-good-normal",
+      "shape": "rect",
+      "width": 64,
+      "height": 64,
+      "weight": 1,
+      "is_good": true,
+      "points": 300
+    },
+    {
+      "kind": "big-money",
+      "sprite": "test-item-good-normal",
+      "shape": "rect",
+      "width": 64,
+      "height": 64,
+      "weight": 1,
+      "is_good": true,
+      "points": 300
+    },
+    {
+      "kind": "remote",
+      "sprite": "test-item-good-normal",
+      "shape": "rect",
+      "width": 64,
+      "height": 64,
+      "weight": 1,
+      "is_good": true,
+      "points": 300
+    },
+    {
+      "kind": "rejection",
+      "sprite": "test-item-bad",
+      "shape": "rect",
+      "width": 64,
+      "height": 64,
+      "weight": 1,
+      "is_good": false,
+      "points": 0
+    },
+    {
+      "kind": "ignore",
+      "sprite": "test-item-bad",
+      "shape": "rect",
+      "width": 64,
+      "height": 64,
+      "weight": 1,
+      "is_good": false,
+      "points": 0
+    },
+    {
+      "kind": "nightmare-stack",
+      "sprite": "test-item-bad",
+      "shape": "rect",
+      "width": 64,
+      "height": 64,
+      "weight": 1,
+      "is_good": false,
+      "points": 0
+    }
+  ],
+  "player": {
+    "sprite": "test-player",
+    "width": 96,
+    "height": 126,
+    "speed": 1000
+  },
+  "waves": [
+    { "spawn_multiplier": 1.0, "speed_multiplier": 1.0, "duration": 30 },
+    { "spawn_multiplier": 0.8, "speed_multiplier": 1.2, "duration": 30 },
+    { "spawn_multiplier": 0.8, "speed_multiplier": 1.2, "duration": 60 },
+    { "spawn_multiplier": 0.8, "speed_multiplier": 1.2, "duration": 60 },
+    { "spawn_multiplier": 0.8, "speed_multiplier": 1.2, "duration": 60 }
+  ]
+}

@@ -2,10 +2,6 @@ package game
 
 import k2 "../karl2d"
 
-CARD_WIDTH: f32 : 225
-CARD_HEIGHT: f32 : 400
-CARD_GAP: f32 : 50
-
 Difficulty :: enum {
 	Easy,
 	Medium,
@@ -22,30 +18,35 @@ DifficutlyCard :: struct {
 	card:  k2.Rect,
 }
 
-menu_init :: proc() -> Menu {
+menu_init :: proc(cards_config: CardsConfig) -> Menu {
 	screen := game_screen_size()
 
-	total_width := CARD_WIDTH * 3 + CARD_GAP * 2
+	total_width := cards_config.width * 3 + cards_config.gap * 2
 	start_x := screen.x / 2 - total_width / 2
-	start_y := screen.y / 2 - CARD_HEIGHT / 2
+	start_y := screen.y / 2 - cards_config.height / 2
 
-	settings_card :: proc(start_x: f32, start_y: f32, i: int) -> k2.Rect {
-		card_x := start_x + cast(f32)i * (CARD_WIDTH + CARD_GAP)
-		return k2.Rect{x = card_x, y = start_y, w = CARD_WIDTH, h = CARD_HEIGHT}
+	settings_card :: proc(
+		cards_config: CardsConfig,
+		start_x: f32,
+		start_y: f32,
+		i: int,
+	) -> k2.Rect {
+		card_x := start_x + cast(f32)i * (cards_config.width + cards_config.gap)
+		return k2.Rect{x = card_x, y = start_y, w = cards_config.width, h = cards_config.height}
 	}
 
 	difficulty_cards := [Difficulty]DifficutlyCard {
 		.Easy = {
 			label = "2021-2022",
-			card = settings_card(start_x, start_y, int(Difficulty.Easy)),
+			card = settings_card(cards_config, start_x, start_y, int(Difficulty.Easy)),
 		},
 		.Medium = {
 			label = "2023-2024",
-			card = settings_card(start_x, start_y, int(Difficulty.Medium)),
+			card = settings_card(cards_config, start_x, start_y, int(Difficulty.Medium)),
 		},
 		.Hard = {
 			label = "2025-2026",
-			card = settings_card(start_x, start_y, int(Difficulty.Hard)),
+			card = settings_card(cards_config, start_x, start_y, int(Difficulty.Hard)),
 		},
 	}
 
@@ -62,7 +63,7 @@ DifficultySettings :: struct {
 menu_update :: proc(menu: ^Menu, dt: f32) -> GameState {
 	if k2.key_went_down(.Left) do menu.selected -= 1
 	if k2.key_went_down(.Right) do menu.selected += 1
-	menu.selected = clamp(menu.selected, 0, len(Difficulty))
+	menu.selected = clamp(menu.selected, 0, len(Difficulty) - 1)
 
 	mouse := game_mouse_position()
 	for difficulty, i in menu.difficulty_cards {
@@ -111,15 +112,15 @@ set_difficulty :: proc(chosen: Difficulty) -> DifficultySettings {
 	return {}
 }
 
-menu_draw :: proc(menu: Menu) {
+menu_draw :: proc(cards_config: CardsConfig, menu: Menu) {
 	for difficulty, i in menu.difficulty_cards {
 		color := k2.GREEN if int(i) == menu.selected else k2.GRAY
 		k2.draw_rect(difficulty.card, color)
 
 		// TODO: this could be calc'ed ones inside card too
 		text_size := k2.measure_text(difficulty.label, 50)
-		text_x := difficulty.card.x + (CARD_WIDTH / 2) - (text_size.x / 2)
-		text_y := difficulty.card.y + CARD_HEIGHT + 20
+		text_x := difficulty.card.x + (cards_config.width / 2) - (text_size.x / 2)
+		text_y := difficulty.card.y + cards_config.height + 20
 
 		k2.draw_text(difficulty.label, {text_x, text_y}, 50, color)
 	}

@@ -4,10 +4,11 @@ import k2 "../karl2d"
 
 main :: proc() {
 	k2.init(WINDOW_WIDTH, WINDOW_HEIGHT, "Greetings!")
-	textures := textures_init()
+	config := load_game_config()
+
 	game_state := GameState.Title
 	// TODO: Should this be cleaned when the game starts?
-	menu := menu_init()
+	menu := menu_init(config.cards)
 	session: Session
 	// TODO: And what about cleaning this up?
 	modifier_options: ModifierOptions
@@ -21,22 +22,22 @@ main :: proc() {
 		case .Title:
 			next_state := menu_update(&menu, dt)
 			if next_state == .Playing {
-				session = game_init(Difficulty(menu.selected))
+				session = game_init(config, Difficulty(menu.selected))
 				game_state = next_state
 			} else {
-				menu_draw(menu)
+				menu_draw(config.cards, menu)
 			}
 		case .Playing:
-			next_state := game_update(&session, dt)
+			next_state := game_update(config, &session, dt)
 			if next_state == .ModifierPick {
-				modifier_options = modifier_pick_init(session)
+				modifier_options = modifier_pick_init(config.cards, session)
 			}
 			game_state = next_state
-			game_draw(session, textures)
+			game_draw(config, session)
 			effects_reset(session.effects)
 		case .ModifierPick:
-			game_state = modifier_pick_update(&session, &modifier_options, dt)
-			modifier_pick_draw(modifier_options)
+			game_state = modifier_pick_update(config, &session, &modifier_options, dt)
+			modifier_pick_draw(config.cards, modifier_options)
 		case .GameOver:
 			game_state = gameover_update()
 			gameover_draw(session)

@@ -3,42 +3,55 @@ package game
 import k2 "../karl2d"
 import "core:math/rand"
 
-ITEM_WIDTH: f32 : 32 * 2
-ITEM_HEIGHT: f32 : 32 * 2
-
-GoodKind :: enum {
+// TODO: I'm not happy with this shape, see more usage and re-shape
+ItemKind :: enum {
+	// Good
 	Normal,
 	Call,
 	Faang,
 	FireStack,
 	BigMoney,
 	Remote,
-}
-
-BadKind :: enum {
+	// Bad
 	Rejection,
 	Ignore,
 	NightmareStack,
 }
 
-GoodItemDef :: struct {
-	kind:   GoodKind,
+// TODO: Not used yet
+ItemShape :: enum {
+	Rect,
+	Circle,
+}
+
+ItemDef :: struct {
+	kind:   ItemKind,
+	sprite: k2.Texture,
+	shape:  ItemShape,
+	width:  f32,
+	height: f32,
 	weight: f32,
+	effect: CatchEffect,
+}
+
+GoodItemCaught :: struct {
 	points: u32,
 }
 
-BadItemDef :: struct {
-	kind:   BadKind,
-	weight: f32,
+BadItemCaught :: struct {}
+
+CatchEffect :: union {
+	GoodItemCaught,
+	BadItemCaught,
 }
 
-ItemDef :: union {
-	GoodItemDef,
-	BadItemDef,
+ItemCatalog :: struct {
+	by_kind:     map[ItemKind]ItemDef,
+	good:        [dynamic]ItemDef,
+	bad:         [dynamic]ItemDef,
+	good_weight: f32,
+	bad_weight:  f32,
 }
-
-FLASHING_LIFETIME: f32 : 0.3
-FLASHING_SPEED: f32 : 10
 
 ItemState :: enum {
 	Inactive,
@@ -50,75 +63,62 @@ Item :: struct {
 	x, y:             f32,
 	width, height:    f32,
 	speed:            f32,
-	type:             ItemDef,
+	kind:             ItemKind,
 	state:            ItemState,
 	// for the Flashing state
 	flashing_elapsed: f32,
 }
 
-good_item_defs := []GoodItemDef {
-	{kind = .Normal, weight = 5, points = 100},
-	{kind = .Call, weight = 5, points = 200},
-	{kind = .Faang, weight = 1, points = 300},
-	{kind = .FireStack, weight = 1, points = 300},
-	{kind = .BigMoney, weight = 1, points = 300},
-	{kind = .Remote, weight = 1, points = 300},
-}
-
-// TODO: Add more
-bad_item_defs := []BadItemDef {
-	{kind = .Rejection, weight = 4},
-	{kind = .Ignore, weight = 4},
-	{kind = .NightmareStack, weight = 2},
-}
-
-// TODO: Improve randomness or let pool pass bool and own that
-item_init :: proc(screen_x: f32, speed: f32) -> Item {
-	type: ItemDef
-	if rand.float32() < 0.6 {type = pick_weighted_good()} else {type = pick_weighted_bad()}
+item_init :: proc(config: GameConfig, screen_x: f32, speed: f32) -> Item {
+	kind := pick_weighted_item_kind(config.item_pool, config.items)
+	def := config.items.by_kind[kind]
 
 	return Item {
-		x = rand.float32_range(0, screen_x - ITEM_WIDTH / 2),
-		y = -ITEM_HEIGHT,
-		width = ITEM_WIDTH,
-		height = ITEM_HEIGHT,
+		x = rand.float32_range(0, screen_x - def.width / 2),
+		y = -def.height,
+		width = def.width,
+		height = def.height,
 		speed = speed,
-		type = type,
+		kind = kind,
 		state = .Falling,
 		flashing_elapsed = 0,
 	}
 }
 
-// TODO: Refactor to be generic
-pick_weighted_good :: proc() -> GoodItemDef {
-	// Do it ones?
-	total: f32
-	for d in good_item_defs do total += d.weight
-
-	r := rand.float32() * total
-	for d in good_item_defs {
-		r -= d.weight
-		if r <= 0 do return d
+pick_weighted_item_kind :: proc(item_pool_config: ItemPoolConfig, items: ItemCatalog) -> ItemKind {
+	item_defs := items.good[:]
+	total_weight := items.good_weight
+	if rand.float32() >= item_pool_config.good_to_bad_ratio {
+		item_defs = items.bad[:]
+		total_weight = items.bad_weight
 	}
 
-	return good_item_defs[0] // just in case
+	return pick_weighted_item_kind_from(item_defs, total_weight)
 }
 
-pick_weighted_bad :: proc() -> BadItemDef {
-	// Do it ones?
-	total: f32
-	for d in bad_item_defs do total += d.weight
+pick_weighted_item_kind_from :: proc(item_defs: []ItemDef, total_weight: f32) -> ItemKind {
+	if len(item_defs) == 0 || total_weight <= 0 do return .Normal
 
-	r := rand.float32() * total
-	for d in bad_item_defs {
+	r := rand.float32() * total_weight
+	for d in item_defs {
 		r -= d.weight
-		if r <= 0 do return d
+		if r <= 0 do return d.kind
 	}
 
-	return bad_item_defs[0] // just in case
+	return item_defs[0].kind
 }
 
-item_draw :: proc(item: Item, textures: Textures) {
+item_is_good :: proc(def: ItemDef) -> bool {
+	switch effect in def.effect {
+	case GoodItemCaught:
+		return true
+	case BadItemCaught:
+		return false
+	}
+	return false
+}
+
+item_draw :: proc(effects_config: EffectsConfig, item_def: ItemDef, item: Item) {
 	item_box := k2.Rect {
 		x = item.x,
 		y = item.y,
@@ -126,49 +126,19 @@ item_draw :: proc(item: Item, textures: Textures) {
 		h = item.height,
 	}
 
-	// TODO: Is there a better way to pattern match on kind?
-	// TODO: Fill those out and move?
-	texture: k2.Texture
-	switch def in item.type {
-	case GoodItemDef:
-		switch def.kind {
-		case .Normal:
-			texture = textures.item_good
-		case .Call:
-			texture = textures.item_good_call
-		case .Faang:
-			fallthrough
-		case .FireStack:
-			fallthrough
-		case .BigMoney:
-			fallthrough
-		case .Remote:
-			texture = textures.item_good
-		}
-	case BadItemDef:
-		switch def.kind {
-		case .Rejection:
-			fallthrough
-		case .Ignore:
-			fallthrough
-		case .NightmareStack:
-			texture = textures.item_bad
-		}
-	}
-
 	switch item.state {
 	case .Inactive:
 		break
 	case .Falling:
-		k2.draw_texture_fit(texture, k2.get_texture_rect(texture), item_box)
+		k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
 		// TODO: This only works with squares, what about circles?
-		k2.draw_rect_outline(item_box, 3, get_item_color(item))
+		k2.draw_rect_outline(item_box, 3, get_item_color(item_def))
 	case .Flashing:
-		flashing := int(item.flashing_elapsed * FLASHING_SPEED) % 2 == 0
+		flashing := int(item.flashing_elapsed * effects_config.flashing_speed) % 2 == 0
 		if flashing {
-			k2.draw_texture_fit(texture, k2.get_texture_rect(texture), item_box)
+			k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
 			// TODO: This only works with squares, what about circles?
-			k2.draw_rect_outline(item_box, 3, get_item_color(item))
+			k2.draw_rect_outline(item_box, 3, get_item_color(item_def))
 		} else {
 			// TODO: This only works with squares, what about circles?
 			k2.draw_rect(item_box, k2.WHITE)
@@ -178,22 +148,20 @@ item_draw :: proc(item: Item, textures: Textures) {
 
 // TODO: How to properly pattern match on kind?
 // TODO: Special color for "selected" items, this is just for testing
-get_item_color :: proc(item: Item) -> k2.Color {
-	switch def in item.type {
-	case GoodItemDef:
-		switch def.kind {
+get_item_color :: proc(def: ItemDef) -> k2.Color {
+	switch effect in def.effect {
+	case GoodItemCaught:
+		#partial switch def.kind {
 		case .Normal, .Call:
 			return k2.GREEN
 		case .Faang, .FireStack, .BigMoney, .Remote:
 			return k2.PURPLE
 		}
-	case BadItemDef:
+	case BadItemCaught:
 		return k2.RED
 	}
 	return k2.WHITE // :shrug:
 }
-
-ITEM_SPAWN_TIMER: f32 : 0.5
 
 ItemPool :: struct {
 	setting_spawn_timer: f32,
@@ -219,7 +187,7 @@ item_pool_init :: proc(active_cap: u8, speed: f32, spawn_cooldown: f32) -> ItemP
 }
 
 // Uses primitive cooldown based on dt
-item_pool_spawn :: proc(item_pool: ^ItemPool, screen_x: f32, dt: f32) {
+item_pool_spawn :: proc(config: GameConfig, item_pool: ^ItemPool, screen_x: f32, dt: f32) {
 	item_pool.spawn_cooldown -= dt
 	if item_pool.spawn_cooldown <= 0 {
 		item_pool.spawn_cooldown = item_pool.setting_spawn_timer
@@ -228,14 +196,14 @@ item_pool_spawn :: proc(item_pool: ^ItemPool, screen_x: f32, dt: f32) {
 			// re-use a spot
 			for &item in item_pool.items {
 				if item.state == .Inactive {
-					item = item_init(screen_x, item_pool.setting_item_speed)
+					item = item_init(config, screen_x, item_pool.setting_item_speed)
 					found = true
 					break
 				}
 			}
 			// or create a new one (TODO: this is ugly and should be pre-allocated)
 			if !found {
-				item := item_init(screen_x, item_pool.setting_item_speed)
+				item := item_init(config, screen_x, item_pool.setting_item_speed)
 				append(&item_pool.items, item)
 			}
 			item_pool.currently_active += 1
@@ -243,11 +211,11 @@ item_pool_spawn :: proc(item_pool: ^ItemPool, screen_x: f32, dt: f32) {
 	}
 }
 
-// TODO: Not cleaned (need proper pool and reuse later?)
 item_remove :: proc(pool: ^ItemPool, item: ^Item) {
-	item.state = .Flashing
-	// item.active = false
-	pool.currently_active -= 1
+	if item.state == .Falling {
+		item.state = .Flashing
+		pool.currently_active -= 1
+	}
 }
 
 item_pool_next_wave :: proc(item_pool: ^ItemPool, spawn_multiplier: f32, speed_multiplier: f32) {
