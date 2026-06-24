@@ -131,18 +131,34 @@ item_draw :: proc(effects_config: EffectsConfig, item_def: ItemDef, item: Item) 
 		break
 	case .Falling:
 		k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
-		// TODO: This only works with squares, what about circles?
-		k2.draw_rect_outline(item_box, 3, get_item_color(item_def))
+		draw_item_outline(item_def.shape, item_box, 3, get_item_color(item_def))
 	case .Flashing:
 		flashing := int(item.flashing_elapsed * effects_config.flashing_speed) % 2 == 0
 		if flashing {
-			k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
-			// TODO: This only works with squares, what about circles?
-			k2.draw_rect_outline(item_box, 3, get_item_color(item_def))
+			draw_item_flashing(item_def.shape, item_box, k2.WHITE)
 		} else {
-			// TODO: This only works with squares, what about circles?
-			k2.draw_rect(item_box, k2.WHITE)
+			k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
+			draw_item_outline(item_def.shape, item_box, 3, get_item_color(item_def))
 		}
+	}
+}
+
+draw_item_outline :: proc(shape: ItemShape, box: k2.Rect, thickness: f32, color: k2.Color) {
+	switch shape {
+	case .Rect:
+		k2.draw_rect_outline(box, thickness, color)
+	case .Circle:
+		// TODO: This is not really pixel-arty :)
+		k2.draw_circle_outline(k2.rect_center(box), box.w / 2, thickness, color)
+	}
+}
+
+draw_item_flashing :: proc(shape: ItemShape, box: k2.Rect, color: k2.Color) {
+	switch shape {
+	case .Rect:
+		k2.draw_rect(box, color)
+	case .Circle:
+		k2.draw_circle(k2.rect_center(box), box.w / 2, color)
 	}
 }
 
