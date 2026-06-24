@@ -32,6 +32,12 @@ effects_draw :: proc(effects: Effects) {
 	}
 }
 
+// TODO: Move this to config and/or play with formulas
+get_multiplier :: proc(combo: u32) -> u32 {
+	return 1.0 + combo / 10
+}
+
+// TODO: Add to config
 FLOATING_TEXT_LIFETIME: f32 : 1
 
 // TODO: Might need to do floating hearts too
@@ -41,7 +47,6 @@ FloatingText :: struct {
 	elapsed: f32,
 	active:  bool,
 }
-
 
 // TODO: Currently, if we get more than 16 notifications, we won't show anything (ok for now)
 floating_text_pool_update :: proc(floating_text_pool: ^[16]FloatingText, dt: f32) {
@@ -68,6 +73,7 @@ floating_text_spawn :: proc(floating_text_pool: ^[16]FloatingText, x, y: f32, te
 	}
 }
 
+// TODO: Pass the score as int or something and use it to manipulate the size (and color)
 floating_text_draw :: proc(floating_text: FloatingText) {
 	text_width := k2.measure_text(floating_text.text, 20).x
 	text_x := floating_text.x - (text_width / 2)

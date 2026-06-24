@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:os"
 import filepath "core:path/filepath"
 import "core:strings"
+import "core:time"
 
 BaseConfig :: struct {
 	cards:     CardsConfig,
@@ -15,9 +16,10 @@ BaseConfig :: struct {
 }
 
 GameConfig :: struct {
-	using _: BaseConfig,
-	player:  PlayerConfig,
-	items:   ItemCatalog,
+	using _:    BaseConfig,
+	player:     PlayerConfig,
+	items:      ItemCatalog,
+	updated_at: time.Time,
 }
 
 GameConfigRaw :: struct {
@@ -72,11 +74,10 @@ WaveConfig :: struct {
 	duration:         f32,
 }
 
-load_game_config :: proc() -> GameConfig {
+game_config_load :: proc() -> GameConfig {
 	// TODO: allocator? config is for the whole game anyway
 	config_path := asset_path_required("config/game.json", "game config")
 	data, os_err := os.read_entire_file(config_path, context.allocator)
-
 	if os_err != nil {
 		fmt.eprintln("Failed to read the config file", config_path, os.error_string(os_err))
 		panic("Failed to read the config file")
@@ -89,11 +90,36 @@ load_game_config :: proc() -> GameConfig {
 		panic("Failed to parse the config file")
 	}
 
-	return parse_game_config(raw_config)
+	last_write_at, time_err := os.last_write_time_by_name(config_path)
+	if time_err != nil {
+		fmt.eprintln("Failed to read config's write time", config_path, os.error_string(time_err))
+		panic("Failed to read the config's write time")
+	}
+
+	return parse_game_config(raw_config, last_write_at)
 }
 
-parse_game_config :: proc(raw: GameConfigRaw) -> GameConfig {
+game_config_reload :: proc(game_config: ^GameConfig) {
+	config_path := asset_path_required("config/game.json", "game config")
+	last_write_at, time_err := os.last_write_time_by_name(config_path)
+
+	if time_err != nil {
+		fmt.eprintln(
+			"Failed to re-read config's write time",
+			config_path,
+			os.error_string(time_err),
+		)
+		panic("Failed to re-read the config's write time")
+	}
+
+	if last_write_at != game_config.updated_at {
+		game_config^ = game_config_load()
+	}
+}
+
+parse_game_config :: proc(raw: GameConfigRaw, updated_at: time.Time) -> GameConfig {
 	item_pool := parse_item_pool_config(raw.item_pool)
+
 	return GameConfig {
 		cards = parse_cards_config(raw.cards),
 		effects = parse_effects_config(raw.effects),
@@ -101,6 +127,7 @@ parse_game_config :: proc(raw: GameConfigRaw) -> GameConfig {
 		player = parse_player_config(raw.player),
 		waves = parse_waves_config(raw.waves),
 		items = parse_items_config(raw.items, item_pool.good_to_bad_ratio),
+		updated_at = updated_at,
 	}
 }
 

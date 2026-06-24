@@ -4,7 +4,7 @@ import k2 "../karl2d"
 
 main :: proc() {
 	k2.init(WINDOW_WIDTH, WINDOW_HEIGHT, "Greetings!")
-	config := load_game_config()
+	config := game_config_load()
 
 	game_state := GameState.Title
 	// TODO: Should this be cleaned when the game starts?
@@ -17,6 +17,9 @@ main :: proc() {
 		dt := k2.get_frame_time()
 		k2.clear(k2.LIGHT_BLUE)
 		set_game_camera()
+
+		// TODO: only do it in dev mode
+		game_config_reload(&config)
 
 		switch game_state {
 		case .Title:
@@ -38,6 +41,9 @@ main :: proc() {
 		case .ModifierPick:
 			game_state = modifier_pick_update(config, &session, &modifier_options, dt)
 			modifier_pick_draw(config.cards, modifier_options)
+		case .Pause:
+			game_state = pause_update()
+			pause_draw(session)
 		case .GameOver:
 			game_state = gameover_update()
 			gameover_draw(session)

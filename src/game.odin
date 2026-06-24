@@ -7,6 +7,7 @@ GameState :: enum {
 	Title,
 	Playing,
 	ModifierPick,
+	Pause,
 	GameOver,
 }
 
@@ -14,6 +15,7 @@ Session :: struct {
 	player:            Player,
 	item_pool:         ItemPool,
 	effects:           Effects,
+	combo:             u32,
 	score:             u32,
 	// just in case we go below 0
 	lives:             i8,
@@ -34,6 +36,7 @@ game_init :: proc(config: GameConfig, difficulty: Difficulty) -> Session {
 			settings.spawn_interval,
 		),
 		effects           = effects_init(),
+		combo             = 0,
 		score             = 0,
 		lives             = cast(i8)settings.lives,
 		current_wave      = 0,
@@ -46,6 +49,8 @@ game_init :: proc(config: GameConfig, difficulty: Difficulty) -> Session {
 game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState {
 	screen := game_screen_size()
 
+	if k2.key_went_down(.Escape) do return GameState.Pause
+
 	session.wave_timer += dt
 	// Make progress (clamp it to X waves to be reasonable... for now)
 	if session.wave_timer > config.waves[session.current_wave].duration &&
@@ -55,18 +60,14 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 
 	player_update(config.player, &session.player, dt)
 	item_pool_spawn(config, &session.item_pool, screen.x, dt)
-	score_delta, lives_delta := item_pool_update(
+	item_pool_update(
 		config.effects,
-		&session.item_pool,
+		session,
 		config.items,
-		&session.effects,
-		session.player,
 		good_catch_margin = session.good_catch_margin,
 		dt = dt,
 	)
 	effects_update(&session.effects, dt)
-	session.score += score_delta
-	session.lives += lives_delta
 
 	if session.lives <= 0 {return .GameOver} else {return .Playing}
 }
@@ -75,18 +76,13 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 // TODO: With effects even worse now, need to refactor
 item_pool_update :: proc(
 	effect_config: EffectsConfig,
-	item_pool: ^ItemPool,
+	session: ^Session,
 	items: ItemCatalog,
-	effects: ^Effects,
-	player: Player,
 	good_catch_margin: f32,
 	dt: f32,
-) -> (
-	score_delta: u32,
-	lives_delta: i8,
 ) {
 	screen := game_screen_size()
-	for &item in item_pool.items {
+	for &item in session.item_pool.items {
 		def := items.by_kind[item.kind]
 
 		// TODO: Extract into item_update
@@ -98,9 +94,10 @@ item_pool_update :: proc(
 
 			// Item leaves
 			if item.y + item.height / 2 > screen.y {
-				item_remove(item_pool, &item)
+				item_remove(&session.item_pool, &item)
 				if item_is_good(def) {
-					lives_delta -= 1
+					session.lives -= 1
+					session.combo = 0
 				}
 				// TODO: We should give user a chance to pick up almost remove item?
 				continue
@@ -109,23 +106,29 @@ item_pool_update :: proc(
 			// Item caught
 			switch effect in def.effect {
 			case GoodItemCaught:
-				if (has_collision(player, item, good_catch_margin)) {
+				if (has_collision(session.player, item, good_catch_margin)) {
 					// TODO: We should pass something closer to collision's x,y
+					multiplier := get_multiplier(session.combo)
+
+					text :=
+						fmt.tprintf("+%d", effect.points) if multiplier == 1 else fmt.tprintf("+%d x%d", effect.points, int(multiplier))
 					floating_text_spawn(
-						&effects.floating_texts,
-						player.x + player.width / 2,
-						player.y - 10,
-						fmt.tprintf("+%d", effect.points),
+						&session.effects.floating_texts,
+						session.player.x + session.player.width / 2,
+						session.player.y - 10,
+						text,
 					)
-					item_remove(item_pool, &item)
-					score_delta += effect.points
+					item_remove(&session.item_pool, &item)
+					session.score += effect.points * multiplier
+					session.combo += 1
 					continue
 				}
 			case BadItemCaught:
-				if (has_collision(player, item)) {
-					item_remove(item_pool, &item)
-					effects.shake_is_active = true
-					lives_delta -= 1
+				if (has_collision(session.player, item)) {
+					item_remove(&session.item_pool, &item)
+					session.effects.shake_is_active = true
+					session.lives -= 1
+					session.combo = 0
 					continue
 				}
 			}
@@ -137,7 +140,6 @@ item_pool_update :: proc(
 			}
 		}
 	}
-	return score_delta, lives_delta
 }
 
 // TODO: Use built-in functions
@@ -157,6 +159,12 @@ game_draw :: proc(config: GameConfig, session: Session) {
 	for &item in session.item_pool.items do item_draw(config.effects, config.items.by_kind[item.kind], item)
 	effects_draw(session.effects)
 
-	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 100, 10}, 20, k2.GRAY)
-	k2.draw_text(fmt.tprintf("Lives: %d", session.lives), {screen.x - 100, 30}, 20, k2.GRAY)
+	// TODO: ugly mess (lives should be hearts on the right, score should go to the left? or center?)
+	k2.draw_text(fmt.tprintf("Lives: %d", session.lives), {screen.x - 150, 10}, 20, k2.GRAY)
+	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 150, 30}, 20, k2.GRAY)
+
+	multiplier := get_multiplier(session.combo)
+	combo :=
+		fmt.tprintf("Combo: %d x%d", session.combo, multiplier) if multiplier > 1 else fmt.tprintf("Combo: %d", session.combo)
+	k2.draw_text(combo, {screen.x - 150, 50}, 20, k2.GRAY)
 }

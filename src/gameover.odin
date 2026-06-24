@@ -14,8 +14,7 @@ gameover_update :: proc() -> GameState {
 gameover_draw :: proc(session: Session) {
 	screen := game_screen_size()
 
-	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 100, 10}, 20, k2.GRAY)
-	k2.draw_text(fmt.tprintf("Lives: %d", session.lives), {screen.x - 100, 30}, 20, k2.GRAY)
+	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 150, 10}, 20, k2.GRAY)
 
 	// TODO: R to restart?
 	text_width := k2.measure_text("GAME OVER", 50).x

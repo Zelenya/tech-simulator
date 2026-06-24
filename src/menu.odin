@@ -35,6 +35,7 @@ menu_init :: proc(cards_config: CardsConfig) -> Menu {
 		return k2.Rect{x = card_x, y = start_y, w = cards_config.width, h = cards_config.height}
 	}
 
+	// TODO: Move to config
 	difficulty_cards := [Difficulty]DifficutlyCard {
 		.Easy = {
 			label = "2021-2022",
@@ -85,6 +86,7 @@ menu_update :: proc(menu: ^Menu, dt: f32) -> GameState {
 	return GameState.Title
 }
 
+// TODO: Move to config
 set_difficulty :: proc(chosen: Difficulty) -> DifficultySettings {
 	switch chosen {
 	case .Easy:
@@ -97,7 +99,7 @@ set_difficulty :: proc(chosen: Difficulty) -> DifficultySettings {
 	case .Medium:
 		return DifficultySettings {
 			spawn_interval = 0.5,
-			item_speed = 500,
+			item_speed = 300,
 			max_active = 3,
 			lives = 4,
 		}
