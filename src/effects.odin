@@ -7,12 +7,18 @@ Effects :: struct {
 	shake_is_active: bool,
 	shake_elapsed:   f32,
 	floating_texts:  [16]FloatingText,
+	preference:      Maybe(ItemKind),
 }
 
 // TODO: Also needs better pools
 effects_init :: proc() -> Effects {
 	empty: [16]FloatingText
-	return Effects{shake_is_active = false, shake_elapsed = 0, floating_texts = empty}
+	return Effects {
+		shake_is_active = false,
+		shake_elapsed = 0,
+		floating_texts = empty,
+		preference = nil,
+	}
 }
 
 effects_update :: proc(effects: ^Effects, dt: f32) {
@@ -32,8 +38,14 @@ effects_draw :: proc(effects: Effects) {
 	}
 }
 
+get_multiplier :: proc(effects: Effects, combo: u32, item_kind: ItemKind) -> u32 {
+	// TODO: Move this to config and/or play with formulas
+	item_multiplier: u32 = 2 if effects.preference == item_kind else 1
+	return item_multiplier * get_combo_multiplier(combo)
+}
+
 // TODO: Move this to config and/or play with formulas
-get_multiplier :: proc(combo: u32) -> u32 {
+get_combo_multiplier :: proc(combo: u32) -> u32 {
 	return 1.0 + combo / 10
 }
 

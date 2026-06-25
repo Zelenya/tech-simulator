@@ -118,7 +118,7 @@ item_is_good :: proc(def: ItemDef) -> bool {
 	return false
 }
 
-item_draw :: proc(effects_config: EffectsConfig, item_def: ItemDef, item: Item) {
+item_draw :: proc(effects_config: EffectsConfig, effects: Effects, item_def: ItemDef, item: Item) {
 	item_box := k2.Rect {
 		x = item.x,
 		y = item.y,
@@ -126,19 +126,19 @@ item_draw :: proc(effects_config: EffectsConfig, item_def: ItemDef, item: Item) 
 		h = item.height,
 	}
 
-	switch item.state {
+	#partial switch item.state {
 	case .Inactive:
 		break
 	case .Falling:
 		k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
-		draw_item_outline(item_def.shape, item_box, 3, get_item_color(item_def))
+		draw_item_outline(item_def.shape, item_box, 3, get_item_color(effects, item_def))
 	case .Flashing:
 		flashing := int(item.flashing_elapsed * effects_config.flashing_speed) % 2 == 0
 		if flashing {
 			draw_item_flashing(item_def.shape, item_box, k2.WHITE)
 		} else {
 			k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
-			draw_item_outline(item_def.shape, item_box, 3, get_item_color(item_def))
+			draw_item_outline(item_def.shape, item_box, 3, get_item_color(effects, item_def))
 		}
 	}
 }
@@ -162,21 +162,19 @@ draw_item_flashing :: proc(shape: ItemShape, box: k2.Rect, color: k2.Color) {
 	}
 }
 
-// TODO: How to properly pattern match on kind?
-// TODO: Special color for "selected" items, this is just for testing
-get_item_color :: proc(def: ItemDef) -> k2.Color {
+get_item_color :: proc(effects: Effects, def: ItemDef) -> k2.Color {
 	switch effect in def.effect {
 	case GoodItemCaught:
-		#partial switch def.kind {
-		case .Normal, .Call:
-			return k2.GREEN
-		case .Faang, .FireStack, .BigMoney, .Remote:
+		if effects.preference == def.kind {
 			return k2.PURPLE
+		} else {
+			return k2.GREEN
 		}
 	case BadItemCaught:
 		return k2.RED
 	}
-	return k2.WHITE // :shrug:
+	// idk
+	return k2.WHITE
 }
 
 ItemPool :: struct {

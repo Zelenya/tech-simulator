@@ -4,7 +4,15 @@ import k2 "../karl2d"
 import "core:fmt"
 import "core:math/rand"
 
+// TODO: PreferencesModifier
+
 ModifierKind :: enum {
+	// Preferences:
+	Prestige,
+	TechStack,
+	Compensation,
+	RemoteWork,
+	// To reshuffle:
 	Immunity,
 	// TODO: Not sure this works well, might need to draw
 	WiderCatch,
@@ -15,6 +23,14 @@ ModifierKind :: enum {
 // TODO: Make effect configurable
 modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: ModifierKind) {
 	switch modifier {
+	case .Prestige:
+		session.effects.preference = .Faang
+	case .TechStack:
+		session.effects.preference = .FireStack
+	case .Compensation:
+		session.effects.preference = .BigMoney
+	case .RemoteWork:
+		session.effects.preference = .Remote
 	case .Immunity:
 		session.lives += 1
 	case .WiderCatch:
@@ -30,15 +46,16 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 	}
 }
 
-modifiers_pick :: proc() -> [3]ModifierKind {
-	// TODO: Is there a way to clean up this?
-	all := [len(ModifierKind)]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow}
-	rand.shuffle(all[:])
-	return {all[0], all[1], all[2]}
-}
-
 modifier_label :: proc(kind: ModifierKind) -> string {
 	switch kind {
+	case .Prestige:
+		return "Prestige"
+	case .TechStack:
+		return "Interesting tech"
+	case .Compensation:
+		return "Compenstaion"
+	case .RemoteWork:
+		return "Remote"
 	case .Immunity:
 		return "Get extra life"
 	case .WiderCatch:
@@ -48,7 +65,7 @@ modifier_label :: proc(kind: ModifierKind) -> string {
 	case .WideAndSlow:
 		return "Get wider and slower"
 	}
-	return "what is this, go?"
+	return "idk"
 }
 
 ModifierOptions :: struct {
@@ -63,6 +80,7 @@ ModifierCard :: struct {
 }
 
 modifier_pick_init :: proc(cards_config: CardsConfig, session: Session) -> ModifierOptions {
+	fmt.printfln("Wave: %v", session.current_wave)
 	screen := game_screen_size()
 
 	total_width := cards_config.width * 3 + cards_config.gap * 2
@@ -76,7 +94,7 @@ modifier_pick_init :: proc(cards_config: CardsConfig, session: Session) -> Modif
 
 	option_cards: [3]ModifierCard
 	// TODO: Improve randomness and make level dependend
-	for option, i in modifiers_pick() {
+	for option, i in modifiers_pick(session.current_wave) {
 		option_cards[i] = {
 			kind  = option,
 			label = modifier_label(option),
@@ -87,8 +105,25 @@ modifier_pick_init :: proc(cards_config: CardsConfig, session: Session) -> Modif
 	return ModifierOptions{options = option_cards, selected = 0}
 }
 
+// TODO: Is there a way to clean this up?
+// TODO: Tie it to the waves length
+modifier_packs := [5][4]ModifierKind {
+	0 = [4]ModifierKind{.Prestige, .TechStack, .Compensation, .RemoteWork},
+	1 = [4]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow},
+	2 = [4]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow},
+	3 = [4]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow},
+	4 = [4]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow},
+}
+
+modifiers_pick :: proc(wave: int) -> [3]ModifierKind {
+	for_wave := modifier_packs[wave]
+	rand.shuffle(for_wave[:])
+	return {for_wave[0], for_wave[1], for_wave[2]}
+}
+
 // TODO: Should modifier own waves? or make wave.odin that owns game+modifiers
 // TODO: Should we re-use menu card picking code?
+// TODO: Allow picks with 1,2,3
 modifier_pick_update :: proc(
 	config: GameConfig,
 	session: ^Session,
@@ -139,7 +174,6 @@ wave_next :: proc(
 		speed_multiplier = wave.speed_multiplier,
 	)
 	modifier_apply(config, session, modifier)
-	fmt.printfln("Wave: %v", session.current_wave)
 	return GameState.Playing
 }
 

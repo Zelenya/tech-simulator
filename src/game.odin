@@ -107,11 +107,10 @@ item_pool_update :: proc(
 			switch effect in def.effect {
 			case GoodItemCaught:
 				if (has_collision(session.player, item, good_catch_margin)) {
-					// TODO: We should pass something closer to collision's x,y
-					multiplier := get_multiplier(session.combo)
-
+					multiplier := get_multiplier(session.effects, session.combo, item.kind)
 					text :=
 						fmt.tprintf("+%d", effect.points) if multiplier == 1 else fmt.tprintf("+%d x%d", effect.points, int(multiplier))
+					// TODO: We should pass something closer to collision's x,y
 					floating_text_spawn(
 						&session.effects.floating_texts,
 						session.player.x + session.player.width / 2,
@@ -156,14 +155,14 @@ game_draw :: proc(config: GameConfig, session: Session) {
 	screen := game_screen_size()
 
 	player_draw(session.player, config.player)
-	for &item in session.item_pool.items do item_draw(config.effects, config.items.by_kind[item.kind], item)
+	for &item in session.item_pool.items do item_draw(config.effects, session.effects, config.items.by_kind[item.kind], item)
 	effects_draw(session.effects)
 
 	// TODO: ugly mess (lives should be hearts on the right, score should go to the left? or center?)
 	k2.draw_text(fmt.tprintf("Lives: %d", session.lives), {screen.x - 150, 10}, 20, k2.GRAY)
 	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 150, 30}, 20, k2.GRAY)
 
-	multiplier := get_multiplier(session.combo)
+	multiplier := get_combo_multiplier(session.combo)
 	combo :=
 		fmt.tprintf("Combo: %d x%d", session.combo, multiplier) if multiplier > 1 else fmt.tprintf("Combo: %d", session.combo)
 	k2.draw_text(combo, {screen.x - 150, 50}, 20, k2.GRAY)
