@@ -141,14 +141,11 @@ item_pool_update :: proc(
 	}
 }
 
-// TODO: Use built-in functions
 has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
-	return(
-		item.x - margin < player.x + player.width &&
-		item.x + item.width + margin > player.x &&
-		item.y - margin < player.y + player.height &&
-		item.y + item.height + margin > player.y \
-	)
+	player_box := k2.rect_from_pos_size({player.x, player.y}, {player.width, player.height})
+	// TODO: What if item is a circle? Does it matter much?
+	item_box := k2.rect_from_pos_size({item.x, item.y}, {item.width, item.height})
+	return k2.rect_overlapping(player_box, k2.rect_expand(item_box, margin, margin))
 }
 
 game_draw :: proc(config: GameConfig, session: Session) {
