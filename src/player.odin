@@ -2,9 +2,16 @@ package game
 
 import k2 "../karl2d"
 
+Moving :: enum {
+	Idle,
+	Left,
+	Right,
+}
+
 Player :: struct {
 	x, y:          f32,
 	width, height: f32,
+	moving:        Moving,
 	// TODO
 	// hitbox_offset: k2.Vec2,
 	// hitbox_size:   k2.Vec2,
@@ -24,9 +31,18 @@ player_update :: proc(config: PlayerConfig, player: ^Player, dt: f32) {
 	screen := game_screen_size()
 	mouse := game_mouse_position()
 	mouse_delta := k2.get_mouse_delta()
-	if mouse_delta.x != 0 do player.x = mouse.x - config.width / 2
-	if k2.key_is_held(.Left) do player.x -= config.speed * dt
-	if k2.key_is_held(.Right) do player.x += config.speed * dt
+	if mouse_delta.x != 0 {
+		player.moving = .Left if mouse_delta.x < 0 else .Right
+		player.x = mouse.x - config.width / 2
+	}
+	if k2.key_is_held(.Left) {
+		player.moving = .Left
+		player.x -= config.speed * dt
+	}
+	if k2.key_is_held(.Right) {
+		player.moving = .Left
+		player.x += config.speed * dt
+	}
 	player.x = clamp(player.x, 0, screen.x - config.width)
 }
 
@@ -37,6 +53,11 @@ player_draw :: proc(player: Player, config: PlayerConfig) {
 		w = player.width,
 		h = player.height,
 	}
+
+	source := k2.get_texture_rect(config.sprite)
+	// TODO: Until we have better sprites, that'll do
+	if player.moving == .Left do source.w = -source.w
+
 	// k2.draw_rect_outline(player_box, 1, k2.RED) // test hit box
-	k2.draw_texture_fit(config.sprite, k2.get_texture_rect(config.sprite), player_box)
+	k2.draw_texture_fit(config.sprite, source, player_box)
 }
