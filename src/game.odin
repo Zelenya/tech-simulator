@@ -12,37 +12,35 @@ GameState :: enum {
 }
 
 Session :: struct {
-	player:            Player,
-	item_pool:         ItemPool,
-	effects:           Effects,
-	combo:             u32,
-	score:             u32,
+	player:       Player,
+	item_catalog: ItemCatalog,
+	item_pool:    ItemPool,
+	effects:      Effects,
+	combo:        u32,
+	score:        u32,
 	// just in case we go below 0
-	lives:             i8,
-	current_wave:      int,
-	wave_timer:        f32,
-	// to be more forgiving and flexible with good catches
-	good_catch_margin: f32,
+	lives:        i8,
+	current_wave: int,
+	wave_timer:   f32,
 }
 
 game_init :: proc(config: GameConfig, difficulty: Difficulty) -> Session {
 	settings := set_difficulty(difficulty)
 
 	return Session {
-		player            = player_init(config.player),
-		item_pool         = item_pool_init(
+		player = player_init(config.player),
+		item_catalog = item_catalog_init(config.items, config.item_pool),
+		item_pool = item_pool_init(
 			settings.max_active,
 			settings.item_speed,
 			settings.spawn_interval,
 		),
-		effects           = effects_init(),
-		combo             = 0,
-		score             = 0,
-		lives             = cast(i8)settings.lives,
-		current_wave      = 0,
-		wave_timer        = 0,
-		// TODO: Make it part of the difficulty too?
-		good_catch_margin = 0,
+		effects = effects_init(),
+		combo = 0,
+		score = 0,
+		lives = cast(i8)settings.lives,
+		current_wave = 0,
+		wave_timer = 0,
 	}
 }
 
@@ -59,14 +57,8 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	}
 
 	player_update(config.player, &session.player, dt)
-	item_pool_spawn(config, &session.item_pool, screen.x, dt)
-	item_pool_update(
-		config.effects,
-		session,
-		config.items,
-		good_catch_margin = session.good_catch_margin,
-		dt = dt,
-	)
+	item_pool_spawn(config, session.item_catalog, &session.item_pool, screen.x, dt)
+	item_pool_update(config.effects, session, session.item_catalog, dt = dt)
 	effects_update(&session.effects, dt)
 
 	if session.lives <= 0 {return .GameOver} else {return .Playing}
@@ -78,7 +70,6 @@ item_pool_update :: proc(
 	effect_config: EffectsConfig,
 	session: ^Session,
 	items: ItemCatalog,
-	good_catch_margin: f32,
 	dt: f32,
 ) {
 	screen := game_screen_size()
@@ -91,6 +82,12 @@ item_pool_update :: proc(
 			continue
 		case .Falling:
 			item.y += item.speed * dt
+
+			if _, is_good := def.effect.(GoodItemCaught);
+			   is_good && session.effects.good_catch_magnet > 1 {
+				dir := session.player.x - item.x
+				item.x += dir * session.effects.good_catch_magnet * dt
+			}
 
 			// Item leaves
 			if item.y + item.height / 2 > screen.y {
@@ -106,7 +103,7 @@ item_pool_update :: proc(
 			// Item caught
 			switch effect in def.effect {
 			case GoodItemCaught:
-				if (has_collision(session.player, item, good_catch_margin)) {
+				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
 					multiplier := get_multiplier(session.effects, session.combo, item.kind)
 					text :=
 						fmt.tprintf("+%d", effect.points) if multiplier == 1 else fmt.tprintf("+%d x%d", effect.points, int(multiplier))
@@ -152,7 +149,7 @@ game_draw :: proc(config: GameConfig, session: Session) {
 	screen := game_screen_size()
 
 	player_draw(session.player, config.player)
-	for &item in session.item_pool.items do item_draw(config.effects, session.effects, config.items.by_kind[item.kind], item)
+	for &item in session.item_pool.items do item_draw(config.effects, session.effects, session.item_catalog.by_kind[item.kind], item)
 	effects_draw(session.effects)
 
 	// TODO: ugly mess (lives should be hearts on the right, score should go to the left? or center?)

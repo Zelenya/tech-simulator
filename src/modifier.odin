@@ -4,20 +4,34 @@ import k2 "../karl2d"
 import "core:fmt"
 import "core:math/rand"
 
-// TODO: PreferencesModifier
-
+// TODO: Split enum?
 ModifierKind :: enum {
 	// Preferences:
 	Prestige,
 	TechStack,
 	Compensation,
 	RemoteWork,
-	// To reshuffle:
-	Immunity,
-	// TODO: Not sure this works well, might need to draw
-	WiderCatch,
-	SlowerItems,
-	WideAndSlow,
+	// Good:
+	AddPetProject,
+	AskForReferral,
+	HiringFreeze,
+	FileUnemployment,
+	GiveConferenceTalk,
+	// Curses:
+	Burnout,
+	LeetCodeGrind,
+	LowerQualityBar,
+	TightenCV,
+	SprayAndPray,
+	// Wild:
+	AutomatePipeline,
+	BlindApplication,
+	GiveUp,
+	RecruiterSpam,
+	ImposterSyndrom,
+	// Final:
+	Bonus,
+	Continue,
 }
 
 // TODO: Make effect configurable
@@ -31,21 +45,48 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 		session.effects.preference = .BigMoney
 	case .RemoteWork:
 		session.effects.preference = .Remote
-	case .Immunity:
+
+	case .AddPetProject: // TODO
+	case .AskForReferral:
+		// We update preferences on the prev. wave, player should always have one
+		item_to_boost, ok := session.effects.preference.?
+		if ok do item_catalog_update_weight(&session.item_catalog, item_to_boost, 3)
+	case .FileUnemployment:
 		session.lives += 1
-	case .WiderCatch:
-		// Increase by 20%, TODO: make configurable
-		// TODO: Should probably just use percents there
-		session.good_catch_margin += config.player.width * 0.2
-	case .SlowerItems:
-		// Decrease by 20%, TODO: make configurable
-		session.item_pool.setting_item_speed *= 0.8
-	case .WideAndSlow:
-		modifier_apply(config, session, .SlowerItems)
-		modifier_apply(config, session, .WiderCatch)
+	case .GiveConferenceTalk:
+		session.effects.good_catch_margin += config.player.width * 0.2
+		session.effects.good_catch_magnet *= 1.5
+	case .HiringFreeze:
+		// This conflicst with wave bumps?
+		session.item_pool.setting_item_speed *= 0.6
+
+	case .Burnout:
+		session.item_pool.setting_item_speed *= 1.5
+		session.effects.score_base *= 3
+	case .LeetCodeGrind: // TODO
+	case .LowerQualityBar:
+		item_catalog_update_good_to_bad_ratio(&session.item_catalog, 1.5)
+		// TODO: Should this be gated for people with one life?
+		session.lives -= 1
+	case .TightenCV:
+		item_catalog_update_good_to_bad_ratio(&session.item_catalog, 0.5)
+		session.effects.score_base *= 5
+	case .SprayAndPray:
+		item_catalog_update_good_to_bad_ratio(&session.item_catalog, 1.3)
+		session.effects.score_base /= 4
+
+	case .AutomatePipeline: // TODO
+	case .BlindApplication: // TODO
+	case .GiveUp: // TODO
+	case .RecruiterSpam: // TODO
+	case .ImposterSyndrom: // TODO
+
+	case .Bonus: // TODO
+	case .Continue: // TODO
 	}
 }
 
+// TODO: How much should this be in config vs. drawn?
 modifier_label :: proc(kind: ModifierKind) -> string {
 	switch kind {
 	case .Prestige:
@@ -56,14 +97,44 @@ modifier_label :: proc(kind: ModifierKind) -> string {
 		return "Compenstaion"
 	case .RemoteWork:
 		return "Remote"
-	case .Immunity:
+
+	case .AddPetProject:
+		return "Bonus item every 5 catches"
+	case .AskForReferral:
+		return "Ask for referrals"
+	case .FileUnemployment:
 		return "Get extra life"
-	case .WiderCatch:
-		return "Get wider"
-	case .SlowerItems:
-		return "Get slower"
-	case .WideAndSlow:
-		return "Get wider and slower"
+	case .GiveConferenceTalk:
+		return "Get wider + magnet"
+	case .HiringFreeze:
+		return "Hiring freeze"
+
+	case .Burnout:
+		return "faster items, x2 points"
+	case .LeetCodeGrind:
+		return "less bad items, but good move erratically"
+	case .LowerQualityBar:
+		return "more good items, -1 life"
+	case .TightenCV:
+		return "x3 bad items, x5 points"
+	case .SprayAndPray:
+		return "x1.5 good items, 1/3 points"
+
+	case .AutomatePipeline:
+		return "fast and slow"
+	case .BlindApplication:
+		return "hide stuff"
+	case .GiveUp:
+		return "loose lifes every 1 min"
+	case .RecruiterSpam:
+		return "spam"
+	case .ImposterSyndrom:
+		return "hide the score"
+
+	case .Bonus:
+		return "Accept the challenge"
+	case .Continue:
+		return "I'm not ready"
 	}
 	return "idk"
 }
@@ -107,12 +178,25 @@ modifier_pick_init :: proc(cards_config: CardsConfig, session: Session) -> Modif
 
 // TODO: Is there a way to clean this up?
 // TODO: Tie it to the waves length
-modifier_packs := [5][4]ModifierKind {
-	0 = [4]ModifierKind{.Prestige, .TechStack, .Compensation, .RemoteWork},
-	1 = [4]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow},
-	2 = [4]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow},
-	3 = [4]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow},
-	4 = [4]ModifierKind{.Immunity, .WiderCatch, .SlowerItems, .WideAndSlow},
+modifier_packs := [5][]ModifierKind {
+	0 = []ModifierKind{.Prestige, .TechStack, .Compensation, .RemoteWork},
+	1 = []ModifierKind {
+		.AddPetProject,
+		.AskForReferral,
+		.FileUnemployment,
+		.GiveConferenceTalk,
+		.HiringFreeze,
+	},
+	2 = []ModifierKind{.Burnout, .LeetCodeGrind, .LowerQualityBar, .TightenCV, .SprayAndPray},
+	3 = []ModifierKind {
+		.AutomatePipeline,
+		.BlindApplication,
+		.GiveUp,
+		.RecruiterSpam,
+		.ImposterSyndrom,
+	},
+	// TODO: This isn't shown yet
+	4 = []ModifierKind{.Bonus, .Continue, .Bonus, .Continue},
 }
 
 modifiers_pick :: proc(wave: int) -> [3]ModifierKind {

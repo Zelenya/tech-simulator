@@ -18,7 +18,7 @@ BaseConfig :: struct {
 GameConfig :: struct {
 	using _:    BaseConfig,
 	player:     PlayerConfig,
-	items:      ItemCatalog,
+	items:      map[ItemKind]ItemDef,
 	updated_at: time.Time,
 }
 
@@ -159,52 +159,40 @@ parse_item_pool_config :: proc(config: ItemPoolConfig) -> ItemPoolConfig {
 }
 
 // Fill out item catalog so we don't have to recalculate the weights for each random generation
-parse_items_config :: proc(raw: []ItemConfigRaw, good_to_bad_ratio: f32) -> ItemCatalog {
+parse_items_config :: proc(raw: []ItemConfigRaw, good_to_bad_ratio: f32) -> map[ItemKind]ItemDef {
 	if len(raw) == 0 {
 		fmt.eprintln("Invalid items config: items must be non-empty")
 		panic("Invalid items config")
 	}
 
-	item_catalog := ItemCatalog {
-		by_kind = make(map[ItemKind]ItemDef),
-	}
-
+	by_kind := make(map[ItemKind]ItemDef)
 	for item in raw {
-		def := parse_item_def(item_catalog, item)
+		def := parse_item_def(&by_kind, item)
 		if item.is_good {
 			def.effect = GoodItemCaught {
 				points = item.points,
 			}
-			append_elem(&item_catalog.good, def)
-			item_catalog.good_weight += def.weight
+			// append_elem(&item_catalog.good, def)
+			// item_catalog.good_weight += def.weight
 		} else {
 			def.effect = BadItemCaught{}
-			append_elem(&item_catalog.bad, def)
-			item_catalog.bad_weight += def.weight
+			// append_elem(&item_catalog.bad, def)
+			// item_catalog.bad_weight += def.weight
 		}
-		map_insert(&item_catalog.by_kind, def.kind, def)
+		map_insert(&by_kind, def.kind, def)
 	}
 
-	if len(item_catalog.good) == 0 || len(item_catalog.bad) == 0 {
-		fmt.eprintln(
-			"Invalid items config: need at least one good and bad item. Got: %v, %v",
-			item_catalog.good,
-			item_catalog.bad,
-		)
-		panic("Invalid game config")
-	}
-
-	return item_catalog
+	return by_kind
 }
 
 // Note: doesn't set the item effect
-parse_item_def :: proc(item_catalog: ItemCatalog, raw: ItemConfigRaw) -> ItemDef {
+parse_item_def :: proc(by_kind: ^map[ItemKind]ItemDef, raw: ItemConfigRaw) -> ItemDef {
 	kind, kind_ok := kind_from_string(raw.kind).?
 	if !kind_ok {
 		fmt.eprintfln("Invalid item config: unknown item kind '%v'", raw.kind)
 		panic("Invalid item config")
 	}
-	if kind in item_catalog.by_kind {
+	if kind in by_kind {
 		fmt.eprintfln("Invalid item config: duplicate item kind '%v'", raw.kind)
 		panic("Invalid item config")
 	}

@@ -46,11 +46,53 @@ CatchEffect :: union {
 }
 
 ItemCatalog :: struct {
-	by_kind:     map[ItemKind]ItemDef,
-	good:        [dynamic]ItemDef,
-	bad:         [dynamic]ItemDef,
-	good_weight: f32,
-	bad_weight:  f32,
+	by_kind:           map[ItemKind]ItemDef,
+	good:              [dynamic]ItemDef,
+	bad:               [dynamic]ItemDef,
+	good_weight:       f32,
+	bad_weight:        f32,
+	good_to_bad_ratio: f32,
+}
+
+// TODO: This should be unified with item pool
+item_catalog_init :: proc(
+	item_defs: map[ItemKind]ItemDef,
+	item_pool_config: ItemPoolConfig,
+) -> ItemCatalog {
+	item_catalog := ItemCatalog {
+		by_kind           = item_defs,
+		good_to_bad_ratio = item_pool_config.good_to_bad_ratio,
+	}
+	item_catalog_refill(&item_catalog)
+	return item_catalog
+}
+
+item_catalog_refill :: proc(item_catalog: ^ItemCatalog) {
+	for _, def in item_catalog.by_kind {
+		switch effect in def.effect {
+		case GoodItemCaught:
+			append_elem(&item_catalog.good, def)
+			item_catalog.good_weight += def.weight
+		case BadItemCaught:
+			append_elem(&item_catalog.bad, def)
+			item_catalog.bad_weight += def.weight
+		}
+	}
+}
+
+item_catalog_update_weight :: proc(
+	item_catalog: ^ItemCatalog,
+	item_kind: ItemKind,
+	multiplier: f32,
+) {
+	item := &item_catalog.by_kind[item_kind]
+	item.weight *= multiplier
+	item_catalog_refill(item_catalog)
+}
+
+item_catalog_update_good_to_bad_ratio :: proc(item_catalog: ^ItemCatalog, multiplier: f32) {
+	item_catalog.good_to_bad_ratio *= multiplier
+	item_catalog_refill(item_catalog)
 }
 
 ItemState :: enum {
@@ -69,9 +111,9 @@ Item :: struct {
 	flashing_elapsed: f32,
 }
 
-item_init :: proc(config: GameConfig, screen_x: f32, speed: f32) -> Item {
-	kind := pick_weighted_item_kind(config.item_pool, config.items)
-	def := config.items.by_kind[kind]
+item_init :: proc(item_catalog: ItemCatalog, screen_x: f32, speed: f32) -> Item {
+	kind := pick_weighted_item_kind(item_catalog)
+	def := item_catalog.by_kind[kind]
 
 	return Item {
 		x = rand.float32_range(0, screen_x - def.width / 2),
@@ -85,10 +127,10 @@ item_init :: proc(config: GameConfig, screen_x: f32, speed: f32) -> Item {
 	}
 }
 
-pick_weighted_item_kind :: proc(item_pool_config: ItemPoolConfig, items: ItemCatalog) -> ItemKind {
+pick_weighted_item_kind :: proc(items: ItemCatalog) -> ItemKind {
 	item_defs := items.good[:]
 	total_weight := items.good_weight
-	if rand.float32() >= item_pool_config.good_to_bad_ratio {
+	if rand.float32() >= items.good_to_bad_ratio {
 		item_defs = items.bad[:]
 		total_weight = items.bad_weight
 	}
@@ -201,7 +243,13 @@ item_pool_init :: proc(active_cap: u8, speed: f32, spawn_cooldown: f32) -> ItemP
 }
 
 // Uses primitive cooldown based on dt
-item_pool_spawn :: proc(config: GameConfig, item_pool: ^ItemPool, screen_x: f32, dt: f32) {
+item_pool_spawn :: proc(
+	config: GameConfig,
+	item_catalog: ItemCatalog,
+	item_pool: ^ItemPool,
+	screen_x: f32,
+	dt: f32,
+) {
 	item_pool.spawn_cooldown -= dt
 	if item_pool.spawn_cooldown <= 0 {
 		item_pool.spawn_cooldown = item_pool.setting_spawn_timer
@@ -210,14 +258,14 @@ item_pool_spawn :: proc(config: GameConfig, item_pool: ^ItemPool, screen_x: f32,
 			// re-use a spot
 			for &item in item_pool.items {
 				if item.state == .Inactive {
-					item = item_init(config, screen_x, item_pool.setting_item_speed)
+					item = item_init(item_catalog, screen_x, item_pool.setting_item_speed)
 					found = true
 					break
 				}
 			}
 			// or create a new one (TODO: this is ugly and should be pre-allocated)
 			if !found {
-				item := item_init(config, screen_x, item_pool.setting_item_speed)
+				item := item_init(item_catalog, screen_x, item_pool.setting_item_speed)
 				append(&item_pool.items, item)
 			}
 			item_pool.currently_active += 1

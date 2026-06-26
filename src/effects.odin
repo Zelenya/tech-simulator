@@ -4,10 +4,14 @@ import k2 "../karl2d"
 import "core:math/rand"
 
 Effects :: struct {
-	shake_is_active: bool,
-	shake_elapsed:   f32,
-	floating_texts:  [16]FloatingText,
-	preference:      Maybe(ItemKind),
+	shake_is_active:   bool,
+	shake_elapsed:     f32,
+	floating_texts:    [16]FloatingText,
+	score_base:        u32,
+	preference:        Maybe(ItemKind),
+	good_catch_magnet: f32,
+	// TODO: Make it part of the difficulty too?
+	good_catch_margin: f32,
 }
 
 // TODO: Also needs better pools
@@ -16,8 +20,11 @@ effects_init :: proc() -> Effects {
 	return Effects {
 		shake_is_active = false,
 		shake_elapsed = 0,
+		score_base = 1,
 		floating_texts = empty,
 		preference = nil,
+		good_catch_magnet = 1,
+		good_catch_margin = 1,
 	}
 }
 
@@ -41,7 +48,7 @@ effects_draw :: proc(effects: Effects) {
 get_multiplier :: proc(effects: Effects, combo: u32, item_kind: ItemKind) -> u32 {
 	// TODO: Move this to config and/or play with formulas
 	item_multiplier: u32 = 2 if effects.preference == item_kind else 1
-	return item_multiplier * get_combo_multiplier(combo)
+	return effects.score_base * item_multiplier * get_combo_multiplier(combo)
 }
 
 // TODO: Move this to config and/or play with formulas
