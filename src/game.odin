@@ -58,15 +58,19 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 
 	player_update(config.player, &session.player, dt)
 	item_pool_spawn(config, session.item_catalog, &session.item_pool, screen.x, dt)
-	item_pool_update(config.effects, session, session.item_catalog, dt = dt)
+	item_pool_update(config.sounds, config.effects, session, session.item_catalog, dt = dt)
 	effects_update(&session.effects, dt)
 
-	if session.lives <= 0 {return .GameOver} else {return .Playing}
+	if session.lives <= 0 {
+		k2.play_sound(config.sounds.game_over)
+		return .GameOver
+	} else {return .Playing}
 }
 
 // TODO: This doesn't feel right, this should be inline and/or split by "domain"
 // TODO: With effects even worse now, need to refactor
 item_pool_update :: proc(
+	sounds_config: SoundsConfig,
 	effect_config: EffectsConfig,
 	session: ^Session,
 	items: ItemCatalog,
@@ -83,8 +87,7 @@ item_pool_update :: proc(
 		case .Falling:
 			item.y += item.speed * dt
 
-			if _, is_good := def.effect.(GoodItemCaught);
-			   is_good && session.effects.good_catch_magnet > 1 {
+			if item_is_good(def) && session.effects.good_catch_magnet > 1 {
 				dir := session.player.x - item.x
 				item.x += dir * session.effects.good_catch_magnet * dt
 			}
@@ -93,6 +96,8 @@ item_pool_update :: proc(
 			if item.y + item.height / 2 > screen.y {
 				item_remove(&session.item_pool, &item)
 				if item_is_good(def) {
+					// TODO: Consider different sound
+					k2.play_sound(sounds_config.catch_bad)
 					session.lives -= 1
 					session.combo = 0
 				}
@@ -104,6 +109,7 @@ item_pool_update :: proc(
 			switch effect in def.effect {
 			case GoodItemCaught:
 				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
+					k2.play_sound(sounds_config.catch_good)
 					multiplier := get_multiplier(session.effects, session.combo, item.kind)
 					text :=
 						fmt.tprintf("+%d", effect.points) if multiplier == 1 else fmt.tprintf("+%d x%d", effect.points, int(multiplier))
@@ -121,6 +127,7 @@ item_pool_update :: proc(
 				}
 			case BadItemCaught:
 				if (has_collision(session.player, item)) {
+					k2.play_sound(sounds_config.catch_bad)
 					item_remove(&session.item_pool, &item)
 					session.effects.shake_is_active = true
 					session.lives -= 1

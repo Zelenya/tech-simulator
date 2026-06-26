@@ -55,7 +55,7 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 		session.lives += 1
 	case .GiveConferenceTalk:
 		session.effects.good_catch_margin += config.player.width * 0.2
-		session.effects.good_catch_magnet *= 1.5
+		session.effects.good_catch_magnet *= 1.2
 	case .HiringFreeze:
 		// This conflicst with wave bumps?
 		session.item_pool.setting_item_speed *= 0.6
@@ -94,7 +94,7 @@ modifier_label :: proc(kind: ModifierKind) -> string {
 	case .TechStack:
 		return "Interesting tech"
 	case .Compensation:
-		return "Compenstaion"
+		return "Compensation"
 	case .RemoteWork:
 		return "Remote"
 
@@ -245,6 +245,7 @@ wave_next :: proc(
 	modifier: ModifierKind,
 	dt: f32,
 ) -> GameState {
+	k2.play_sound(config.sounds.wave_next)
 	// TODO: Similar check is duplicate in game loop
 	session.current_wave = min(session.current_wave + 1, len(config.waves) - 1)
 	session.wave_timer = 0

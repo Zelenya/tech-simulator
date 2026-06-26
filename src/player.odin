@@ -40,7 +40,7 @@ player_update :: proc(config: PlayerConfig, player: ^Player, dt: f32) {
 		player.x -= config.speed * dt
 	}
 	if k2.key_is_held(.Right) {
-		player.moving = .Left
+		player.moving = .Right
 		player.x += config.speed * dt
 	}
 	player.x = clamp(player.x, 0, screen.x - config.width)

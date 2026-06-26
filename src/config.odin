@@ -19,12 +19,14 @@ GameConfig :: struct {
 	using _:    BaseConfig,
 	player:     PlayerConfig,
 	items:      map[ItemKind]ItemDef,
+	sounds:     SoundsConfig,
 	updated_at: time.Time,
 }
 
 GameConfigRaw :: struct {
 	using _: BaseConfig,
 	player:  PlayerConfigRaw,
+	sounds:  SoundsConfigRaw,
 	items:   []ItemConfigRaw,
 }
 
@@ -54,6 +56,13 @@ ItemConfigRaw :: struct {
 	points:  u32,
 }
 
+PlayerConfig :: struct {
+	sprite: k2.Texture,
+	width:  f32,
+	height: f32,
+	speed:  f32,
+}
+
 PlayerConfigRaw :: struct {
 	sprite: string,
 	width:  f32,
@@ -61,11 +70,18 @@ PlayerConfigRaw :: struct {
 	speed:  f32,
 }
 
-PlayerConfig :: struct {
-	sprite: k2.Texture,
-	width:  f32,
-	height: f32,
-	speed:  f32,
+SoundsConfig :: struct {
+	catch_good: k2.Sound,
+	catch_bad:  k2.Sound,
+	game_over:  k2.Sound,
+	wave_next:  k2.Sound,
+}
+
+SoundsConfigRaw :: struct {
+	catch_good: string,
+	catch_bad:  string,
+	game_over:  string,
+	wave_next:  string,
 }
 
 WaveConfig :: struct {
@@ -127,6 +143,7 @@ parse_game_config :: proc(raw: GameConfigRaw, updated_at: time.Time) -> GameConf
 		player = parse_player_config(raw.player),
 		waves = parse_waves_config(raw.waves),
 		items = parse_items_config(raw.items, item_pool.good_to_bad_ratio),
+		sounds = parse_sound_config(raw.sounds),
 		updated_at = updated_at,
 	}
 }
@@ -213,7 +230,7 @@ parse_item_def :: proc(by_kind: ^map[ItemKind]ItemDef, raw: ItemConfigRaw) -> It
 
 	return ItemDef {
 		kind = kind,
-		sprite = texture_from(raw.sprite),
+		sprite = load_texture_from(raw.sprite),
 		shape = shape,
 		width = raw.width,
 		height = raw.height,
@@ -228,12 +245,29 @@ parse_player_config :: proc(config: PlayerConfigRaw) -> PlayerConfig {
 	}
 
 	return PlayerConfig {
-		sprite = texture_from(config.sprite),
+		sprite = load_texture_from(config.sprite),
 		width = config.width,
 		height = config.height,
 		speed = config.speed,
 	}
 }
+
+parse_sound_config :: proc(config: SoundsConfigRaw) -> SoundsConfig {
+	return SoundsConfig {
+		catch_good = load_sound_from(config.catch_good),
+		catch_bad = load_sound_from(config.catch_bad),
+		game_over = load_sound_from(config.game_over),
+		wave_next = load_sound_from(config.wave_next),
+	}
+}
+
+load_sound_from :: proc(sound_name: string) -> k2.Sound {
+	// TODO: Review allocation and errors
+	// TODO: This won't work from the bin (or any non root dir)
+	path := asset_path_required(strings.concatenate({"sounds/", sound_name, ".wav"}), sound_name)
+	return k2.load_sound_from_file(path)
+}
+
 
 parse_waves_config :: proc(config: []WaveConfig) -> []WaveConfig {
 	if len(config) == 0 {
@@ -251,7 +285,7 @@ parse_waves_config :: proc(config: []WaveConfig) -> []WaveConfig {
 	return config
 }
 
-texture_from :: proc(sprite_name: string) -> k2.Texture {
+load_texture_from :: proc(sprite_name: string) -> k2.Texture {
 	// TODO: Review allocation and errors
 	// TODO: This won't work from the bin (or any non root dir)
 	path := asset_path_required(
