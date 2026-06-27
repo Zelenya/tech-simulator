@@ -1,4 +1,10 @@
 {
+  "background": {
+    "floor": "bg-floor",
+    "wall": "bg-wall",
+    "window": "bg-window",
+    "size": 64
+  },
   "cards": {
     "width": 225,
     "height": 400,
@@ -14,10 +20,10 @@
   "items": [
     {
       "kind": "normal",
-      "sprite": "test-item-good-normal",
+      "sprite": "item-good-normal",
       "shape": "rect",
-      "width": 64,
-      "height": 64,
+      "width": 62,
+      "height": 80,
       "weight": 5,
       "is_good": true,
       "points": 100
@@ -34,20 +40,20 @@
     },
     {
       "kind": "faang",
-      "sprite": "test-item-good-normal",
+      "sprite": "item-good-faang",
       "shape": "rect",
-      "width": 64,
-      "height": 64,
+      "width": 62,
+      "height": 80,
       "weight": 1,
       "is_good": true,
       "points": 300
     },
     {
       "kind": "fire-stack",
-      "sprite": "test-item-good-normal",
+      "sprite": "item-good-stack",
       "shape": "rect",
-      "width": 64,
-      "height": 64,
+      "width": 62,
+      "height": 80,
       "weight": 1,
       "is_good": true,
       "points": 300
@@ -94,10 +100,10 @@
     },
     {
       "kind": "nightmare-stack",
-      "sprite": "test-item-bad",
+      "sprite": "item-bad-stack",
       "shape": "rect",
-      "width": 64,
-      "height": 64,
+      "width": 62,
+      "height": 80,
       "weight": 1,
       "is_good": false,
       "points": 0

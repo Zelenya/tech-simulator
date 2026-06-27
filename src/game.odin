@@ -68,7 +68,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	effects_update(&session.effects, dt)
 
 	if session.lives <= 0 {
-		// k2.play_sound(config.sounds.game_over)
+		k2.play_sound(config.sounds.game_over)
 		return .GameOver
 	} else {return .Playing}
 }
@@ -123,7 +123,7 @@ item_pool_update :: proc(
 			switch effect in def.effect {
 			case GoodItemCaught:
 				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
-					// k2.play_sound(sounds_config.catch_good)
+					k2.play_sound(sounds_config.catch_good)
 					multiplier := get_multiplier(session.effects, session.combo, item.kind)
 					// TODO: We should pass something closer to collision's x,y
 					floating_text_spawn(
@@ -139,7 +139,7 @@ item_pool_update :: proc(
 				}
 			case BadItemCaught:
 				if (has_collision(session.player, item)) {
-					// k2.play_sound(sounds_config.catch_bad)
+					k2.play_sound(sounds_config.catch_bad)
 					item_remove(&session.item_pool, &item)
 					session.effects.shake_is_active = true
 					session.lives -= 1
@@ -167,6 +167,7 @@ has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 game_draw :: proc(config: GameConfig, session: Session) {
 	screen := game_screen_size()
 
+	game_background_draw(config.background)
 	player_draw(session.player, config.player)
 	for &item in session.item_pool.items {
 		item_draw(config.effects, config.items[item.kind], session.effects, item)}
@@ -180,4 +181,39 @@ game_draw :: proc(config: GameConfig, session: Session) {
 	combo :=
 		fmt.tprintf("Combo: %d x%d", session.combo, multiplier) if multiplier > 1 else fmt.tprintf("Combo: %d", session.combo)
 	k2.draw_text(combo, {screen.x - 150, 50}, 20, k2.GRAY)
+}
+
+game_background_draw :: proc(config: BackgroundConfig) {
+	screen := game_screen_size()
+	size := config.size
+
+	cols := int(screen.x / size) + 1
+	rows := int(screen.y / size) + 1
+
+	for row in 0 ..< rows {
+		y := screen.y - size - f32(row) * size
+		texture := config.floor if row == 0 else config.wall
+		for x in 0 ..< cols {
+			rect := k2.Rect {
+				x = f32(x) * size,
+				y = y,
+				w = size,
+				h = size,
+			}
+			k2.draw_texture_fit(texture, k2.get_texture_rect(texture), rect)
+		}
+	}
+
+	// TODO: Just mock, (pre)generate random positions
+	for i in 1 ..= 3 {
+		window_rect := k2.Rect {
+			x = f32(300 * i),
+			y = f32(100 * i),
+			w = size,
+			h = size,
+		}
+
+		k2.draw_texture_fit(config.window, k2.get_texture_rect(config.window), window_rect)
+	}
+
 }

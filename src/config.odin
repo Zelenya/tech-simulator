@@ -18,6 +18,7 @@ BaseConfig :: struct {
 
 GameConfig :: struct {
 	using _:    BaseConfig,
+	background: BackgroundConfig,
 	player:     PlayerConfig,
 	items:      map[ItemKind]ItemConfig,
 	sounds:     SoundsConfig,
@@ -25,10 +26,26 @@ GameConfig :: struct {
 }
 
 GameConfigRaw :: struct {
-	using _: BaseConfig,
-	player:  PlayerConfigRaw,
-	sounds:  SoundsConfigRaw,
-	items:   []ItemConfigRaw,
+	using _:    BaseConfig,
+	background: BackgroundConfigRaw,
+	player:     PlayerConfigRaw,
+	sounds:     SoundsConfigRaw,
+	items:      []ItemConfigRaw,
+}
+
+// TODO: This needs to be per-item (e.g. window size at 100 and tiles at 50)
+BackgroundConfig :: struct {
+	floor:  k2.Texture,
+	wall:   k2.Texture,
+	window: k2.Texture,
+	size:   f32,
+}
+
+BackgroundConfigRaw :: struct {
+	floor:  string,
+	wall:   string,
+	window: string,
+	size:   f32,
 }
 
 CardsConfig :: struct {
@@ -156,6 +173,7 @@ parse_game_config :: proc(
 	item_pool := parse_item_pool_config(raw.item_pool)
 
 	return GameConfig {
+		background = parse_background_config(raw.background),
 		cards = parse_cards_config(raw.cards),
 		effects = parse_effects_config(raw.effects),
 		item_pool = item_pool,
@@ -164,6 +182,20 @@ parse_game_config :: proc(
 		items = parse_items_config(allocator, raw.items, item_pool.good_to_bad_ratio),
 		sounds = parse_sound_config(raw.sounds),
 		updated_at = updated_at,
+	}
+}
+
+parse_background_config :: proc(raw: BackgroundConfigRaw) -> BackgroundConfig {
+	if raw.size <= 0 {
+		fmt.eprintln("Invalid background config: size must be positive")
+		panic("Invalid background config")
+	}
+
+	return BackgroundConfig {
+		floor = load_texture_from(raw.floor),
+		wall = load_texture_from(raw.wall),
+		window = load_texture_from(raw.window),
+		size = raw.size,
 	}
 }
 
@@ -382,6 +414,11 @@ game_config_destroy :: proc(game_config: ^GameConfig) {
 	for _, item in game_config.items {
 		k2.destroy_texture(item.sprite)
 	}
+
+	// TODO: This should be organized similar to items
+	k2.destroy_texture(game_config.background.floor)
+	k2.destroy_texture(game_config.background.wall)
+	k2.destroy_texture(game_config.background.window)
 
 	// TODO: This should be organized similar to items
 	k2.destroy_sound(game_config.sounds.catch_good)
