@@ -1,6 +1,7 @@
 package game
 
 import k2 "../karl2d"
+import "base:runtime"
 import "core:math/rand"
 
 // TODO: I'm not happy with this shape, see more usage and re-shape
@@ -18,20 +19,20 @@ ItemKind :: enum {
 	NightmareStack,
 }
 
-// TODO: Not used yet
 ItemShape :: enum {
 	Rect,
 	Circle,
 }
 
+// TODO: Merge with item?
 ItemDef :: struct {
-	kind:   ItemKind,
-	sprite: k2.Texture,
-	shape:  ItemShape,
-	width:  f32,
-	height: f32,
 	weight: f32,
 	effect: CatchEffect,
+}
+
+WeightedItem :: struct {
+	kind:   ItemKind,
+	weight: f32,
 }
 
 GoodItemCaught :: struct {
@@ -47,8 +48,8 @@ CatchEffect :: union {
 
 ItemCatalog :: struct {
 	by_kind:           map[ItemKind]ItemDef,
-	good:              [dynamic]ItemDef,
-	bad:               [dynamic]ItemDef,
+	good:              [dynamic]WeightedItem,
+	bad:               [dynamic]WeightedItem,
 	good_weight:       f32,
 	bad_weight:        f32,
 	good_to_bad_ratio: f32,
@@ -56,25 +57,52 @@ ItemCatalog :: struct {
 
 // TODO: This should be unified with item pool
 item_catalog_init :: proc(
-	item_defs: map[ItemKind]ItemDef,
+	allocator: runtime.Allocator,
+	item_configs: map[ItemKind]ItemConfig,
 	item_pool_config: ItemPoolConfig,
 ) -> ItemCatalog {
 	item_catalog := ItemCatalog {
-		by_kind           = item_defs,
-		good_to_bad_ratio = item_pool_config.good_to_bad_ratio,
+		by_kind = make(map[ItemKind]ItemDef, allocator),
+		// TODO: Do we need some capacity here? or use maps?
+		good    = make([dynamic]WeightedItem, allocator),
+		bad     = make([dynamic]WeightedItem, allocator),
 	}
-	item_catalog_refill(&item_catalog)
+	item_catalog_reset_from_config(item_configs, item_pool_config, &item_catalog)
 	return item_catalog
 }
 
+item_catalog_reset_from_config :: proc(
+	item_configs: map[ItemKind]ItemConfig,
+	item_pool_config: ItemPoolConfig,
+	item_catalog: ^ItemCatalog,
+) {
+	clear(&item_catalog.by_kind)
+	item_catalog.good_to_bad_ratio = item_pool_config.good_to_bad_ratio
+
+	for kind, config in item_configs {
+		map_insert(
+			&item_catalog.by_kind,
+			kind,
+			ItemDef{weight = config.weight, effect = config.effect},
+		)
+	}
+
+	item_catalog_refill(item_catalog)
+}
+
 item_catalog_refill :: proc(item_catalog: ^ItemCatalog) {
-	for _, def in item_catalog.by_kind {
+	clear(&item_catalog.good)
+	clear(&item_catalog.bad)
+	item_catalog.good_weight = 0
+	item_catalog.bad_weight = 0
+
+	for kind, def in item_catalog.by_kind {
 		switch effect in def.effect {
 		case GoodItemCaught:
-			append_elem(&item_catalog.good, def)
+			append_elem(&item_catalog.good, WeightedItem{kind = kind, weight = def.weight})
 			item_catalog.good_weight += def.weight
 		case BadItemCaught:
-			append_elem(&item_catalog.bad, def)
+			append_elem(&item_catalog.bad, WeightedItem{kind = kind, weight = def.weight})
 			item_catalog.bad_weight += def.weight
 		}
 	}
@@ -111,15 +139,20 @@ Item :: struct {
 	flashing_elapsed: f32,
 }
 
-item_init :: proc(item_catalog: ItemCatalog, screen_x: f32, speed: f32) -> Item {
+item_init :: proc(
+	item_configs: map[ItemKind]ItemConfig,
+	item_catalog: ItemCatalog,
+	screen_x: f32,
+	speed: f32,
+) -> Item {
 	kind := pick_weighted_item_kind(item_catalog)
-	def := item_catalog.by_kind[kind]
+	config := item_configs[kind]
 
 	return Item {
-		x = rand.float32_range(0, screen_x - def.width / 2),
-		y = -def.height,
-		width = def.width,
-		height = def.height,
+		x = rand.float32_range(0, screen_x - config.width / 2),
+		y = -config.height,
+		width = config.width,
+		height = config.height,
 		speed = speed,
 		kind = kind,
 		state = .Falling,
@@ -128,26 +161,27 @@ item_init :: proc(item_catalog: ItemCatalog, screen_x: f32, speed: f32) -> Item 
 }
 
 pick_weighted_item_kind :: proc(items: ItemCatalog) -> ItemKind {
-	item_defs := items.good[:]
+	weighted := items.good[:]
 	total_weight := items.good_weight
 	if rand.float32() >= items.good_to_bad_ratio {
-		item_defs = items.bad[:]
+		weighted = items.bad[:]
 		total_weight = items.bad_weight
 	}
 
-	return pick_weighted_item_kind_from(item_defs, total_weight)
+	return pick_weighted_item_kind_from(weighted, total_weight)
 }
 
-pick_weighted_item_kind_from :: proc(item_defs: []ItemDef, total_weight: f32) -> ItemKind {
-	if len(item_defs) == 0 || total_weight <= 0 do return .Normal
+pick_weighted_item_kind_from :: proc(items: []WeightedItem, total_weight: f32) -> ItemKind {
+	assert(len(items) > 0)
+	assert(total_weight > 0)
 
 	r := rand.float32() * total_weight
-	for d in item_defs {
+	for d in items {
 		r -= d.weight
 		if r <= 0 do return d.kind
 	}
 
-	return item_defs[0].kind
+	return items[0].kind
 }
 
 item_is_good :: proc(def: ItemDef) -> bool {
@@ -160,7 +194,12 @@ item_is_good :: proc(def: ItemDef) -> bool {
 	return false
 }
 
-item_draw :: proc(effects_config: EffectsConfig, effects: Effects, item_def: ItemDef, item: Item) {
+item_draw :: proc(
+	effects_config: EffectsConfig,
+	item_config: ItemConfig,
+	effects: Effects,
+	item: Item,
+) {
 	item_box := k2.Rect {
 		x = item.x,
 		y = item.y,
@@ -172,15 +211,19 @@ item_draw :: proc(effects_config: EffectsConfig, effects: Effects, item_def: Ite
 	case .Inactive:
 		break
 	case .Falling:
-		k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
-		draw_item_outline(item_def.shape, item_box, 3, get_item_color(effects, item_def))
+		k2.draw_texture_fit(item_config.sprite, k2.get_texture_rect(item_config.sprite), item_box)
+		draw_item_outline(item_config.shape, item_box, 3, get_item_color(effects, item_config))
 	case .Flashing:
 		flashing := int(item.flashing_elapsed * effects_config.flashing_speed) % 2 == 0
 		if flashing {
-			draw_item_flashing(item_def.shape, item_box, k2.WHITE)
+			draw_item_flashing(item_config.shape, item_box, k2.WHITE)
 		} else {
-			k2.draw_texture_fit(item_def.sprite, k2.get_texture_rect(item_def.sprite), item_box)
-			draw_item_outline(item_def.shape, item_box, 3, get_item_color(effects, item_def))
+			k2.draw_texture_fit(
+				item_config.sprite,
+				k2.get_texture_rect(item_config.sprite),
+				item_box,
+			)
+			draw_item_outline(item_config.shape, item_box, 3, get_item_color(effects, item_config))
 		}
 	}
 }
@@ -204,10 +247,11 @@ draw_item_flashing :: proc(shape: ItemShape, box: k2.Rect, color: k2.Color) {
 	}
 }
 
-get_item_color :: proc(effects: Effects, def: ItemDef) -> k2.Color {
-	switch effect in def.effect {
+// Note: If we decide to make effects dynamic and mess with items, this shouldn't use config
+get_item_color :: proc(effects: Effects, item: ItemConfig) -> k2.Color {
+	switch effect in item.effect {
 	case GoodItemCaught:
-		if effects.preference == def.kind {
+		if effects.preference == item.kind {
 			return k2.PURPLE
 		} else {
 			return k2.GREEN
@@ -220,6 +264,7 @@ get_item_color :: proc(effects: Effects, def: ItemDef) -> k2.Color {
 }
 
 ItemPool :: struct {
+	// TODO: Move the settings?
 	setting_spawn_timer: f32,
 	setting_item_speed:  f32,
 	setting_active_cap:  u8,
@@ -230,13 +275,19 @@ ItemPool :: struct {
 
 // TODO: Should probably just create outside of screen anyways, and then change this on spawn.
 // Also should properly pre-allocate and pre-create a list of items and reuse
-item_pool_init :: proc(active_cap: u8, speed: f32, spawn_cooldown: f32) -> ItemPool {
-	empty: [dynamic]Item
+item_pool_init :: proc(
+	allocator: runtime.Allocator,
+	active_cap: u8,
+	speed: f32,
+	spawn_cooldown: f32,
+) -> ItemPool {
+	// TODO: Review. We only see capped active items + flashing items
+	capacity := int(2 * active_cap)
 	return ItemPool {
 		setting_spawn_timer = spawn_cooldown,
 		setting_item_speed = speed,
 		setting_active_cap = active_cap,
-		items = empty,
+		items = make([dynamic]Item, capacity, capacity, allocator),
 		currently_active = 0,
 		spawn_cooldown = spawn_cooldown,
 	}
@@ -258,14 +309,24 @@ item_pool_spawn :: proc(
 			// re-use a spot
 			for &item in item_pool.items {
 				if item.state == .Inactive {
-					item = item_init(item_catalog, screen_x, item_pool.setting_item_speed)
+					item = item_init(
+						config.items,
+						item_catalog,
+						screen_x,
+						item_pool.setting_item_speed,
+					)
 					found = true
 					break
 				}
 			}
-			// or create a new one (TODO: this is ugly and should be pre-allocated)
+			// or create a new one (TODO: this is ok for now, but can be pre-allocated)
 			if !found {
-				item := item_init(item_catalog, screen_x, item_pool.setting_item_speed)
+				item := item_init(
+					config.items,
+					item_catalog,
+					screen_x,
+					item_pool.setting_item_speed,
+				)
 				append(&item_pool.items, item)
 			}
 			item_pool.currently_active += 1
@@ -273,14 +334,20 @@ item_pool_spawn :: proc(
 	}
 }
 
+item_pool_next_wave :: proc(item_pool: ^ItemPool, spawn_multiplier: f32, speed_multiplier: f32) {
+	item_pool.setting_spawn_timer *= spawn_multiplier
+	item_pool.setting_item_speed *= speed_multiplier
+}
+
+item_pool_reset_active :: proc(item_pool: ^ItemPool) {
+	clear(&item_pool.items)
+	item_pool.currently_active = 0
+	item_pool.spawn_cooldown = item_pool.setting_spawn_timer
+}
+
 item_remove :: proc(pool: ^ItemPool, item: ^Item) {
 	if item.state == .Falling {
 		item.state = .Flashing
 		pool.currently_active -= 1
 	}
-}
-
-item_pool_next_wave :: proc(item_pool: ^ItemPool, spawn_multiplier: f32, speed_multiplier: f32) {
-	item_pool.setting_spawn_timer *= spawn_multiplier
-	item_pool.setting_item_speed *= speed_multiplier
 }

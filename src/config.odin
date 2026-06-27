@@ -1,10 +1,11 @@
 package game
 
 import k2 "../karl2d"
+import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
-import filepath "core:path/filepath"
+import "core:path/filepath"
 import "core:strings"
 import "core:time"
 
@@ -18,7 +19,7 @@ BaseConfig :: struct {
 GameConfig :: struct {
 	using _:    BaseConfig,
 	player:     PlayerConfig,
-	items:      map[ItemKind]ItemDef,
+	items:      map[ItemKind]ItemConfig,
 	sounds:     SoundsConfig,
 	updated_at: time.Time,
 }
@@ -43,6 +44,16 @@ EffectsConfig :: struct {
 
 ItemPoolConfig :: struct {
 	good_to_bad_ratio: f32,
+}
+
+ItemConfig :: struct {
+	kind:   ItemKind,
+	sprite: k2.Texture,
+	shape:  ItemShape,
+	width:  f32,
+	height: f32,
+	weight: f32,
+	effect: CatchEffect,
 }
 
 ItemConfigRaw :: struct {
@@ -90,17 +101,16 @@ WaveConfig :: struct {
 	duration:         f32,
 }
 
-game_config_load :: proc() -> GameConfig {
-	// TODO: allocator? config is for the whole game anyway
+game_config_load :: proc(allocator: runtime.Allocator) -> GameConfig {
 	config_path := asset_path_required("config/game.json", "game config")
-	data, os_err := os.read_entire_file(config_path, context.allocator)
+	data, os_err := os.read_entire_file(config_path, context.temp_allocator)
 	if os_err != nil {
 		fmt.eprintln("Failed to read the config file", config_path, os.error_string(os_err))
 		panic("Failed to read the config file")
 	}
 
 	raw_config: GameConfigRaw
-	json_err := json.unmarshal(data, &raw_config)
+	json_err := json.unmarshal(data, &raw_config, allocator = context.temp_allocator)
 	if json_err != nil {
 		fmt.eprintln("Failed to parse the config file", json_err)
 		panic("Failed to parse the config file")
@@ -112,10 +122,10 @@ game_config_load :: proc() -> GameConfig {
 		panic("Failed to read the config's write time")
 	}
 
-	return parse_game_config(raw_config, last_write_at)
+	return parse_game_config(allocator, raw_config, last_write_at)
 }
 
-game_config_reload :: proc(game_config: ^GameConfig) {
+game_config_reload :: proc(allocator: runtime.Allocator, game_config: ^GameConfig) -> bool {
 	config_path := asset_path_required("config/game.json", "game config")
 	last_write_at, time_err := os.last_write_time_by_name(config_path)
 
@@ -129,11 +139,20 @@ game_config_reload :: proc(game_config: ^GameConfig) {
 	}
 
 	if last_write_at != game_config.updated_at {
-		game_config^ = game_config_load()
+		game_config_destroy(game_config)
+		free_all(allocator)
+		game_config^ = game_config_load(allocator)
+		return true
+	} else {
+		return false
 	}
 }
 
-parse_game_config :: proc(raw: GameConfigRaw, updated_at: time.Time) -> GameConfig {
+parse_game_config :: proc(
+	allocator: runtime.Allocator,
+	raw: GameConfigRaw,
+	updated_at: time.Time,
+) -> GameConfig {
 	item_pool := parse_item_pool_config(raw.item_pool)
 
 	return GameConfig {
@@ -141,8 +160,8 @@ parse_game_config :: proc(raw: GameConfigRaw, updated_at: time.Time) -> GameConf
 		effects = parse_effects_config(raw.effects),
 		item_pool = item_pool,
 		player = parse_player_config(raw.player),
-		waves = parse_waves_config(raw.waves),
-		items = parse_items_config(raw.items, item_pool.good_to_bad_ratio),
+		waves = parse_waves_config(allocator, raw.waves),
+		items = parse_items_config(allocator, raw.items, item_pool.good_to_bad_ratio),
 		sounds = parse_sound_config(raw.sounds),
 		updated_at = updated_at,
 	}
@@ -176,25 +195,25 @@ parse_item_pool_config :: proc(config: ItemPoolConfig) -> ItemPoolConfig {
 }
 
 // Fill out item catalog so we don't have to recalculate the weights for each random generation
-parse_items_config :: proc(raw: []ItemConfigRaw, good_to_bad_ratio: f32) -> map[ItemKind]ItemDef {
+parse_items_config :: proc(
+	allocator: runtime.Allocator,
+	raw: []ItemConfigRaw,
+	good_to_bad_ratio: f32,
+) -> map[ItemKind]ItemConfig {
 	if len(raw) == 0 {
 		fmt.eprintln("Invalid items config: items must be non-empty")
 		panic("Invalid items config")
 	}
 
-	by_kind := make(map[ItemKind]ItemDef)
+	by_kind := make(map[ItemKind]ItemConfig, allocator)
 	for item in raw {
 		def := parse_item_def(&by_kind, item)
 		if item.is_good {
 			def.effect = GoodItemCaught {
 				points = item.points,
 			}
-			// append_elem(&item_catalog.good, def)
-			// item_catalog.good_weight += def.weight
 		} else {
 			def.effect = BadItemCaught{}
-			// append_elem(&item_catalog.bad, def)
-			// item_catalog.bad_weight += def.weight
 		}
 		map_insert(&by_kind, def.kind, def)
 	}
@@ -203,7 +222,7 @@ parse_items_config :: proc(raw: []ItemConfigRaw, good_to_bad_ratio: f32) -> map[
 }
 
 // Note: doesn't set the item effect
-parse_item_def :: proc(by_kind: ^map[ItemKind]ItemDef, raw: ItemConfigRaw) -> ItemDef {
+parse_item_def :: proc(by_kind: ^map[ItemKind]ItemConfig, raw: ItemConfigRaw) -> ItemConfig {
 	kind, kind_ok := kind_from_string(raw.kind).?
 	if !kind_ok {
 		fmt.eprintfln("Invalid item config: unknown item kind '%v'", raw.kind)
@@ -228,7 +247,7 @@ parse_item_def :: proc(by_kind: ^map[ItemKind]ItemDef, raw: ItemConfigRaw) -> It
 		panic("Invalid item config")
 	}
 
-	return ItemDef {
+	return ItemConfig {
 		kind = kind,
 		sprite = load_texture_from(raw.sprite),
 		shape = shape,
@@ -262,34 +281,37 @@ parse_sound_config :: proc(config: SoundsConfigRaw) -> SoundsConfig {
 }
 
 load_sound_from :: proc(sound_name: string) -> k2.Sound {
-	// TODO: Review allocation and errors
 	// TODO: This won't work from the bin (or any non root dir)
-	path := asset_path_required(strings.concatenate({"sounds/", sound_name, ".wav"}), sound_name)
+	path := asset_path_required(
+		strings.concatenate({"sounds/", sound_name, ".wav"}, context.temp_allocator),
+		sound_name,
+	)
 	return k2.load_sound_from_file(path)
 }
 
 
-parse_waves_config :: proc(config: []WaveConfig) -> []WaveConfig {
-	if len(config) == 0 {
+parse_waves_config :: proc(allocator: runtime.Allocator, raw: []WaveConfig) -> []WaveConfig {
+	if len(raw) == 0 {
 		fmt.eprintln("Invalid waves config: waves must be non-empty")
 		panic("Invalid waves config")
 	}
 
-	for wave, i in config {
+	for wave, i in raw {
 		if wave.duration <= 0 || wave.spawn_multiplier <= 0 || wave.speed_multiplier <= 0 {
 			fmt.eprintfln("Invalid wave #%v config: duration and multipliers must be positive", i)
 			panic("Invalid waves config")
 		}
 	}
 
+	config := make([]WaveConfig, len(raw), allocator)
+	copy(config, raw)
 	return config
 }
 
 load_texture_from :: proc(sprite_name: string) -> k2.Texture {
-	// TODO: Review allocation and errors
 	// TODO: This won't work from the bin (or any non root dir)
 	path := asset_path_required(
-		strings.concatenate({"sprites/", sprite_name, ".png"}),
+		strings.concatenate({"sprites/", sprite_name, ".png"}, context.temp_allocator),
 		sprite_name,
 	)
 	texture := k2.load_texture_from_file(path)
@@ -341,7 +363,7 @@ shape_from_string :: proc(raw: string) -> Maybe(ItemShape) {
 }
 
 asset_path_required :: proc(relative: string, label: string) -> string {
-	path, err := filepath.join({"assets", relative}, context.allocator)
+	path, err := filepath.join({"assets", relative}, context.temp_allocator)
 	if err != nil {
 		fmt.eprintln("Failed to allocate asset path")
 		panic("Failed to allocate asset path")
@@ -351,4 +373,19 @@ asset_path_required :: proc(relative: string, label: string) -> string {
 
 	fmt.eprintfln("Failed to find asset '%v': %v", label, path)
 	panic("Asset not found")
+}
+
+// TODO: This is fine for now because we recreate all
+game_config_destroy :: proc(game_config: ^GameConfig) {
+	k2.destroy_texture(game_config.player.sprite)
+
+	for _, item in game_config.items {
+		k2.destroy_texture(item.sprite)
+	}
+
+	// TODO: This should be organized similar to items
+	k2.destroy_sound(game_config.sounds.catch_good)
+	k2.destroy_sound(game_config.sounds.catch_bad)
+	k2.destroy_sound(game_config.sounds.game_over)
+	k2.destroy_sound(game_config.sounds.wave_next)
 }

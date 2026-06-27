@@ -245,7 +245,7 @@ wave_next :: proc(
 	modifier: ModifierKind,
 	dt: f32,
 ) -> GameState {
-	k2.play_sound(config.sounds.wave_next)
+	// k2.play_sound(config.sounds.wave_next)
 	// TODO: Similar check is duplicate in game loop
 	session.current_wave = min(session.current_wave + 1, len(config.waves) - 1)
 	session.wave_timer = 0

@@ -1,6 +1,7 @@
 package game
 
 import k2 "../karl2d"
+import "base:runtime"
 import "core:fmt"
 
 GameState :: enum {
@@ -24,13 +25,18 @@ Session :: struct {
 	wave_timer:   f32,
 }
 
-game_init :: proc(config: GameConfig, difficulty: Difficulty) -> Session {
+game_init :: proc(
+	allocator: runtime.Allocator,
+	config: GameConfig,
+	difficulty: Difficulty,
+) -> Session {
 	settings := set_difficulty(difficulty)
 
 	return Session {
 		player = player_init(config.player),
-		item_catalog = item_catalog_init(config.items, config.item_pool),
+		item_catalog = item_catalog_init(allocator, config.items, config.item_pool),
 		item_pool = item_pool_init(
+			allocator,
 			settings.max_active,
 			settings.item_speed,
 			settings.spawn_interval,
@@ -62,9 +68,17 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	effects_update(&session.effects, dt)
 
 	if session.lives <= 0 {
-		k2.play_sound(config.sounds.game_over)
+		// k2.play_sound(config.sounds.game_over)
 		return .GameOver
 	} else {return .Playing}
+}
+
+game_reload :: proc(config: GameConfig, session: ^Session) {
+	item_catalog_reset_from_config(config.items, config.item_pool, &session.item_catalog)
+	item_pool_reset_active(&session.item_pool)
+	session.player = player_init(config.player)
+	// in case we remove a wave:
+	session.current_wave = min(session.current_wave, len(config.waves) - 1)
 }
 
 // TODO: This doesn't feel right, this should be inline and/or split by "domain"
@@ -109,16 +123,14 @@ item_pool_update :: proc(
 			switch effect in def.effect {
 			case GoodItemCaught:
 				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
-					k2.play_sound(sounds_config.catch_good)
+					// k2.play_sound(sounds_config.catch_good)
 					multiplier := get_multiplier(session.effects, session.combo, item.kind)
-					text :=
-						fmt.tprintf("+%d", effect.points) if multiplier == 1 else fmt.tprintf("+%d x%d", effect.points, int(multiplier))
 					// TODO: We should pass something closer to collision's x,y
 					floating_text_spawn(
 						&session.effects.floating_texts,
-						session.player.x + session.player.width / 2,
-						session.player.y - 10,
-						text,
+						{session.player.x + session.player.width / 2, session.player.y - 10},
+						effect.points,
+						multiplier,
 					)
 					item_remove(&session.item_pool, &item)
 					session.score += effect.points * multiplier
@@ -127,7 +139,7 @@ item_pool_update :: proc(
 				}
 			case BadItemCaught:
 				if (has_collision(session.player, item)) {
-					k2.play_sound(sounds_config.catch_bad)
+					// k2.play_sound(sounds_config.catch_bad)
 					item_remove(&session.item_pool, &item)
 					session.effects.shake_is_active = true
 					session.lives -= 1
@@ -156,7 +168,8 @@ game_draw :: proc(config: GameConfig, session: Session) {
 	screen := game_screen_size()
 
 	player_draw(session.player, config.player)
-	for &item in session.item_pool.items do item_draw(config.effects, session.effects, session.item_catalog.by_kind[item.kind], item)
+	for &item in session.item_pool.items {
+		item_draw(config.effects, config.items[item.kind], session.effects, item)}
 	effects_draw(session.effects)
 
 	// TODO: ugly mess (lives should be hearts on the right, score should go to the left? or center?)

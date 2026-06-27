@@ -4,13 +4,14 @@ import k2 "../karl2d"
 
 main :: proc() {
 	k2.init(WINDOW_WIDTH, WINDOW_HEIGHT, "Greetings!")
-	config := game_config_load()
 
+	memory: AppMemory
+	memory_init(&memory)
+
+	config := game_config_load(memory.config)
 	game_state := GameState.Title
-	// TODO: Should this be cleaned when the game starts?
 	menu := menu_init(config.cards)
 	session: Session
-	// TODO: And what about cleaning this up?
 	modifier_options: ModifierOptions
 
 	for k2.update() {
@@ -18,14 +19,25 @@ main :: proc() {
 		k2.clear(k2.LIGHT_BLUE)
 		set_game_camera()
 
-		// TODO: only do it in dev mode
-		game_config_reload(&config)
+		if game_config_reload(memory.config, &config) {
+			switch game_state {
+			case .Title:
+				menu = menu_init(config.cards)
+			case .Playing, .Pause:
+				game_reload(config, &session)
+			case .ModifierPick:
+				game_reload(config, &session)
+				modifier_options = modifier_pick_init(config.cards, session)
+			case .GameOver:
+			}
+		}
 
 		switch game_state {
 		case .Title:
 			next_state := menu_update(&menu, dt)
 			if next_state == .Playing {
-				session = game_init(config, Difficulty(menu.selected))
+				free_all(memory.session)
+				session = game_init(memory.session, config, Difficulty(menu.selected))
 				game_state = next_state
 			} else {
 				menu_draw(config.cards, menu)
@@ -49,6 +61,11 @@ main :: proc() {
 			gameover_draw(session)
 		}
 		k2.present()
+		free_all(context.temp_allocator)
 	}
+
+	game_config_destroy(&config)
+	free_all(memory.config)
+	free_all(memory.session)
 	k2.shutdown()
 }

@@ -1,6 +1,7 @@
 package game
 
 import k2 "../karl2d"
+import "core:fmt"
 import "core:math/rand"
 
 Effects :: struct {
@@ -61,10 +62,11 @@ FLOATING_TEXT_LIFETIME: f32 : 1
 
 // TODO: Might need to do floating hearts too
 FloatingText :: struct {
-	x, y:    f32,
-	text:    string,
-	elapsed: f32,
-	active:  bool,
+	x, y:       f32,
+	points:     u32,
+	multiplier: u32,
+	elapsed:    f32,
+	active:     bool,
 }
 
 // TODO: Currently, if we get more than 16 notifications, we won't show anything (ok for now)
@@ -79,12 +81,18 @@ floating_text_pool_update :: proc(floating_text_pool: ^[16]FloatingText, dt: f32
 }
 
 // TODO: Currently, if we get more than 16 notifications, we won't show anything (ok for now)
-floating_text_spawn :: proc(floating_text_pool: ^[16]FloatingText, x, y: f32, text: string) {
+floating_text_spawn :: proc(
+	floating_text_pool: ^[16]FloatingText,
+	pos: k2.Vec2,
+	points: u32,
+	multiplier: u32,
+) {
 	for &spot in floating_text_pool {
 		if !spot.active {
-			spot.x = x
-			spot.y = y
-			spot.text = text
+			spot.x = pos.x
+			spot.y = pos.y
+			spot.points = points
+			spot.multiplier = multiplier
 			spot.elapsed = 0
 			spot.active = true
 			return
@@ -94,14 +102,22 @@ floating_text_spawn :: proc(floating_text_pool: ^[16]FloatingText, x, y: f32, te
 
 // TODO: Pass the score as int or something and use it to manipulate the size (and color)
 floating_text_draw :: proc(floating_text: FloatingText) {
-	text_width := k2.measure_text(floating_text.text, 20).x
+	text: string
+	if floating_text.multiplier == 1 {
+		text = fmt.tprintf("+%d", floating_text.points)
+	} else {
+		text = fmt.tprintf("+%d x%d", floating_text.points, floating_text.multiplier)
+	}
+
+	text_width := k2.measure_text(text, 20).x
 	text_x := floating_text.x - (text_width / 2)
+
 
 	alpha := 1.0 - floating_text.elapsed / FLOATING_TEXT_LIFETIME
 	faded_green := k2.GREEN
 	faded_green[3] = u8(alpha * 255)
 
-	k2.draw_text(floating_text.text, {text_x, floating_text.y}, 20, faded_green)
+	k2.draw_text(text, {text_x, floating_text.y}, 20, faded_green)
 }
 
 SHAKE_DURATION: f32 : 0.5
