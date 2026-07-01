@@ -137,6 +137,7 @@ Item :: struct {
 	state:            ItemState,
 	// for the Flashing state
 	flashing_elapsed: f32,
+	spawn_elapsed:    f32,
 }
 
 item_init :: proc(
@@ -157,6 +158,7 @@ item_init :: proc(
 		kind = kind,
 		state = .Falling,
 		flashing_elapsed = 0,
+		spawn_elapsed = 0,
 	}
 }
 
@@ -184,6 +186,35 @@ pick_weighted_item_kind_from :: proc(items: []WeightedItem, total_weight: f32) -
 	return items[0].kind
 }
 
+item_update :: proc(
+	effect_config: EffectsConfig,
+	session: ^Session,
+	item: ^Item,
+	def: ItemDef,
+	dt: f32,
+) {
+	switch item.state {
+	case .Inactive:
+	// noop
+	case .Falling:
+		item.y += item.speed * dt
+		item.spawn_elapsed += dt
+
+		if item_is_good(def) && session.effects.good_catch_magnet > 1 {
+			dir := session.player.x - item.x
+			item.x += dir * session.effects.good_catch_magnet * dt
+		}
+	case .Flashing:
+		item.flashing_elapsed += dt
+		if item.flashing_elapsed > effect_config.flashing_lifetime {
+			item.state = .Inactive
+
+			pos: k2.Vec2 = {item.x + item.width / 2, item.y + item.height / 2}
+			particles_spawn(effect_config, &session.effects.particle_pool, pos)
+		}
+	}
+}
+
 item_is_good :: proc(def: ItemDef) -> bool {
 	switch effect in def.effect {
 	case GoodItemCaught:
@@ -200,11 +231,15 @@ item_draw :: proc(
 	effects: Effects,
 	item: Item,
 ) {
+	// Stretch on spawn (TODO: this might need to go into update not to mess with magnets and stuff)
+	scale := min(item.spawn_elapsed / 0.2, 1.0)
+	scale_w := item.width * scale
+	scale_h := item.height * scale
 	item_box := k2.Rect {
-		x = item.x,
-		y = item.y,
-		w = item.width,
-		h = item.height,
+		x = item.x + (item.width - scale_w) / 2,
+		y = item.y + (item.height - scale_h) / 2,
+		w = scale_w,
+		h = scale_h,
 	}
 
 	#partial switch item.state {
@@ -212,23 +247,23 @@ item_draw :: proc(
 		break
 	case .Falling:
 		k2.draw_texture_fit(item_config.sprite, k2.get_texture_rect(item_config.sprite), item_box)
-		draw_item_outline(item_config.shape, item_box, 3, get_item_color(effects, item_config))
+		item_draw_outline(item_config.shape, item_box, 3, get_item_color(effects, item_config))
 	case .Flashing:
 		flashing := int(item.flashing_elapsed * effects_config.flashing_speed) % 2 == 0
 		if flashing {
-			draw_item_flashing(item_config.shape, item_box, k2.WHITE)
+			item_draw_flashing(item_config.shape, item_box, k2.WHITE)
 		} else {
 			k2.draw_texture_fit(
 				item_config.sprite,
 				k2.get_texture_rect(item_config.sprite),
 				item_box,
 			)
-			draw_item_outline(item_config.shape, item_box, 3, get_item_color(effects, item_config))
+			item_draw_outline(item_config.shape, item_box, 3, get_item_color(effects, item_config))
 		}
 	}
 }
 
-draw_item_outline :: proc(shape: ItemShape, box: k2.Rect, thickness: f32, color: k2.Color) {
+item_draw_outline :: proc(shape: ItemShape, box: k2.Rect, thickness: f32, color: k2.Color) {
 	switch shape {
 	case .Rect:
 		k2.draw_rect_outline(box, thickness, color)
@@ -238,7 +273,7 @@ draw_item_outline :: proc(shape: ItemShape, box: k2.Rect, thickness: f32, color:
 	}
 }
 
-draw_item_flashing :: proc(shape: ItemShape, box: k2.Rect, color: k2.Color) {
+item_draw_flashing :: proc(shape: ItemShape, box: k2.Rect, color: k2.Color) {
 	switch shape {
 	case .Rect:
 		k2.draw_rect(box, color)
@@ -306,7 +341,7 @@ item_pool_spawn :: proc(
 		item_pool.spawn_cooldown = item_pool.setting_spawn_timer
 		if item_pool.currently_active < item_pool.setting_active_cap {
 			found := false
-			// re-use a spot
+			// re-use a spot (TODO: better re-use)
 			for &item in item_pool.items {
 				if item.state == .Inactive {
 					item = item_init(

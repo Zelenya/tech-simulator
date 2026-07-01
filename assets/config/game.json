@@ -12,7 +12,19 @@
   },
   "effects": {
     "flashing_lifetime": 0.3,
-    "flashing_speed": 10
+    "flashing_speed": 10,
+    "full_flash_duration": 0.05,
+    "particle_count": 8,
+    "particle_lifetime": 0.5,
+    "particle_size": 10,
+    "particle_speed": 100
+  },
+  "hud": {
+    "margin": 20,
+    "lives_sprite": "life",
+    "lives_gap": 10,
+    "lives_width": 36,
+    "lives_height": 28
   },
   "item_pool": {
     "good_to_bad_ratio": 0.6

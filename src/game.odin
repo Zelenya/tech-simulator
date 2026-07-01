@@ -41,7 +41,7 @@ game_init :: proc(
 			settings.item_speed,
 			settings.spawn_interval,
 		),
-		effects = effects_init(),
+		effects = effects_init(allocator, config.effects),
 		combo = 0,
 		score = 0,
 		lives = cast(i8)settings.lives,
@@ -62,9 +62,70 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 		return .ModifierPick
 	}
 
-	player_update(config.player, &session.player, dt)
 	item_pool_spawn(config, session.item_catalog, &session.item_pool, screen.x, dt)
-	item_pool_update(config.sounds, config.effects, session, session.item_catalog, dt = dt)
+
+	// TODO: it's ok, but could be cleaned up
+	caught := false
+	for &item in session.item_pool.items {
+		def := session.item_catalog.by_kind[item.kind]
+
+		item_update(config.effects, session, &item, def, dt)
+
+		if item.state == .Falling {
+			// Item leaves
+			if item.y + item.height / 2 > screen.y {
+				item_remove(&session.item_pool, &item)
+				if item_is_good(def) {
+					effects_set_hit(config.effects, &session.effects, v2 = true)
+					// TODO: Consider different sound
+					k2.play_sound(config.sounds.catch_bad)
+					session.lives -= 1
+					session.combo = 0
+				}
+				// TODO: We should give user a chance to pick up almost remove item?
+				continue
+			}
+
+			// Item caught
+			switch effect in def.effect {
+			case GoodItemCaught:
+				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
+					k2.play_sound(config.sounds.catch_good)
+					multiplier := get_multiplier(session.effects, session.combo, item.kind)
+					// TODO: We should pass something closer to collision's x,y
+					floating_text_spawn(
+						&session.effects.floating_texts,
+						{session.player.x + session.player.width / 2, session.player.y - 10},
+						effect.points,
+						multiplier,
+					)
+
+					item_remove(&session.item_pool, &item)
+					session.score += effect.points * multiplier
+					session.combo += 1
+					caught = true
+					continue
+				}
+			case BadItemCaught:
+				if (has_collision(session.player, item)) {
+					k2.play_sound(config.sounds.catch_bad)
+					item_remove(&session.item_pool, &item)
+					// TODO: Improve position passing (maybe trigger particles somewhere else)
+					particles_spawn(
+						config.effects,
+						&session.effects.particle_pool,
+						{item.x, item.y},
+					)
+					effects_set_hit(config.effects, &session.effects, v2 = false)
+					session.lives -= 1
+					session.combo = 0
+					caught = true
+					continue
+				}
+			}
+		}
+	}
+	player_update(config.player, &session.player, caught, dt)
 	effects_update(&session.effects, dt)
 
 	if session.lives <= 0 {
@@ -81,82 +142,6 @@ game_reload :: proc(config: GameConfig, session: ^Session) {
 	session.current_wave = min(session.current_wave, len(config.waves) - 1)
 }
 
-// TODO: This doesn't feel right, this should be inline and/or split by "domain"
-// TODO: With effects even worse now, need to refactor
-item_pool_update :: proc(
-	sounds_config: SoundsConfig,
-	effect_config: EffectsConfig,
-	session: ^Session,
-	items: ItemCatalog,
-	dt: f32,
-) {
-	screen := game_screen_size()
-	for &item in session.item_pool.items {
-		def := items.by_kind[item.kind]
-
-		// TODO: Extract into item_update
-		switch item.state {
-		case .Inactive:
-			continue
-		case .Falling:
-			item.y += item.speed * dt
-
-			if item_is_good(def) && session.effects.good_catch_magnet > 1 {
-				dir := session.player.x - item.x
-				item.x += dir * session.effects.good_catch_magnet * dt
-			}
-
-			// Item leaves
-			if item.y + item.height / 2 > screen.y {
-				item_remove(&session.item_pool, &item)
-				if item_is_good(def) {
-					// TODO: Consider different sound
-					k2.play_sound(sounds_config.catch_bad)
-					session.lives -= 1
-					session.combo = 0
-				}
-				// TODO: We should give user a chance to pick up almost remove item?
-				continue
-			}
-
-			// Item caught
-			switch effect in def.effect {
-			case GoodItemCaught:
-				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
-					k2.play_sound(sounds_config.catch_good)
-					multiplier := get_multiplier(session.effects, session.combo, item.kind)
-					// TODO: We should pass something closer to collision's x,y
-					floating_text_spawn(
-						&session.effects.floating_texts,
-						{session.player.x + session.player.width / 2, session.player.y - 10},
-						effect.points,
-						multiplier,
-					)
-					item_remove(&session.item_pool, &item)
-					session.score += effect.points * multiplier
-					session.combo += 1
-					continue
-				}
-			case BadItemCaught:
-				if (has_collision(session.player, item)) {
-					k2.play_sound(sounds_config.catch_bad)
-					item_remove(&session.item_pool, &item)
-					session.effects.shake_is_active = true
-					session.lives -= 1
-					session.combo = 0
-					continue
-				}
-			}
-
-		case .Flashing:
-			item.flashing_elapsed += dt
-			if item.flashing_elapsed > effect_config.flashing_lifetime {
-				item.state = .Inactive
-			}
-		}
-	}
-}
-
 has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 	player_box := k2.rect_from_pos_size({player.x, player.y}, {player.width, player.height})
 	// TODO: What if item is a circle? Does it matter much?
@@ -164,23 +149,49 @@ has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 	return k2.rect_overlapping(player_box, k2.rect_expand(item_box, margin, margin))
 }
 
+// TODO: Move all of those to config
+// MARGIN: f32 : 20
+// HEART_WIDTH: f32 : 36
+// HEART_HEIGHT: f32 : 28
+// HEART_GAP: f32 : 10
+
 game_draw :: proc(config: GameConfig, session: Session) {
 	screen := game_screen_size()
 
+	// all the main elements
 	game_background_draw(config.background)
 	player_draw(session.player, config.player)
 	for &item in session.item_pool.items {
 		item_draw(config.effects, config.items[item.kind], session.effects, item)}
 	effects_draw(session.effects)
 
-	// TODO: ugly mess (lives should be hearts on the right, score should go to the left? or center?)
-	k2.draw_text(fmt.tprintf("Lives: %d", session.lives), {screen.x - 150, 10}, 20, k2.GRAY)
-	k2.draw_text(fmt.tprintf("Score: %d", session.score), {screen.x - 150, 30}, 20, k2.GRAY)
+	// lives
+	// TODO: Move to the right and draw in other direction
+	for i in 1 ..= session.lives {
+		rect := k2.Rect {
+			x = screen.x - config.hud.margin - f32(i) * (config.hud.lives_width + config.hud.lives_gap),
+			y = config.hud.margin,
+			w = config.hud.lives_width,
+			h = config.hud.lives_height,
+		}
+		k2.draw_texture_fit(
+			config.hud.lives_sprite,
+			k2.get_texture_rect(config.hud.lives_sprite),
+			rect,
+		)
+	}
 
+	// TODO: mock visuals (split and prittify)
+	k2.draw_text(
+		fmt.tprintf("Score: %d", session.score),
+		{config.hud.margin, config.hud.margin},
+		20,
+		k2.BLACK,
+	)
 	multiplier := get_combo_multiplier(session.combo)
 	combo :=
 		fmt.tprintf("Combo: %d x%d", session.combo, multiplier) if multiplier > 1 else fmt.tprintf("Combo: %d", session.combo)
-	k2.draw_text(combo, {screen.x - 150, 50}, 20, k2.GRAY)
+	k2.draw_text(combo, {config.hud.margin, config.hud.margin + 20}, 20, k2.BLACK)
 }
 
 game_background_draw :: proc(config: BackgroundConfig) {

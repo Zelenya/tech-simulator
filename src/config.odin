@@ -19,8 +19,9 @@ BaseConfig :: struct {
 GameConfig :: struct {
 	using _:    BaseConfig,
 	background: BackgroundConfig,
-	player:     PlayerConfig,
+	hud:        HudConfig,
 	items:      map[ItemKind]ItemConfig,
+	player:     PlayerConfig,
 	sounds:     SoundsConfig,
 	updated_at: time.Time,
 }
@@ -28,9 +29,10 @@ GameConfig :: struct {
 GameConfigRaw :: struct {
 	using _:    BaseConfig,
 	background: BackgroundConfigRaw,
+	hud:        HudConfigRaw,
+	items:      []ItemConfigRaw,
 	player:     PlayerConfigRaw,
 	sounds:     SoundsConfigRaw,
-	items:      []ItemConfigRaw,
 }
 
 // TODO: This needs to be per-item (e.g. window size at 100 and tiles at 50)
@@ -55,8 +57,29 @@ CardsConfig :: struct {
 }
 
 EffectsConfig :: struct {
-	flashing_lifetime: f32,
-	flashing_speed:    f32,
+	flashing_lifetime:   f32,
+	flashing_speed:      f32,
+	full_flash_duration: f32,
+	particle_count:      u32,
+	particle_lifetime:   f32,
+	particle_size:       f32,
+	particle_speed:      f32,
+}
+
+HudConfig :: struct {
+	margin:       f32,
+	lives_sprite: k2.Texture,
+	lives_width:  f32,
+	lives_height: f32,
+	lives_gap:    f32,
+}
+
+HudConfigRaw :: struct {
+	margin:       f32,
+	lives_sprite: string,
+	lives_width:  f32,
+	lives_height: f32,
+	lives_gap:    f32,
 }
 
 ItemPoolConfig :: struct {
@@ -176,6 +199,7 @@ parse_game_config :: proc(
 		background = parse_background_config(raw.background),
 		cards = parse_cards_config(raw.cards),
 		effects = parse_effects_config(raw.effects),
+		hud = parse_hud_config(raw.hud),
 		item_pool = item_pool,
 		player = parse_player_config(raw.player),
 		waves = parse_waves_config(allocator, raw.waves),
@@ -209,10 +233,32 @@ parse_cards_config :: proc(config: CardsConfig) -> CardsConfig {
 
 parse_effects_config :: proc(config: EffectsConfig) -> EffectsConfig {
 	if config.flashing_lifetime <= 0 || config.flashing_speed <= 0 {
-		fmt.eprintln("Invalid effects config: lifetime and speed must be positive")
+		fmt.eprintln("Invalid flashing effects config: lifetime and speed must be positive")
 		panic("Invalid effects config")
 	}
+	if config.flashing_lifetime <= 0 || config.flashing_speed <= 0 {
+		fmt.eprintln(
+			"Invalid particle effects config: lifetime, speed, and count must be positive",
+		)
+		panic("Invalid effects config")
+	}
+
 	return config
+}
+
+parse_hud_config :: proc(raw: HudConfigRaw) -> HudConfig {
+	if raw.margin <= 0 || raw.lives_width <= 0 || raw.lives_height <= 0 || raw.lives_gap <= 0 {
+		fmt.eprintln("Invalid hud config: margin, lives (width, height, and gap) must be positive")
+		panic("Invalid hud config")
+	}
+
+	return HudConfig {
+		margin = raw.margin,
+		lives_sprite = load_texture_from(raw.lives_sprite),
+		lives_gap = raw.lives_gap,
+		lives_width = raw.lives_width,
+		lives_height = raw.lives_height,
+	}
 }
 
 parse_item_pool_config :: proc(config: ItemPoolConfig) -> ItemPoolConfig {
@@ -419,6 +465,8 @@ game_config_destroy :: proc(game_config: ^GameConfig) {
 	k2.destroy_texture(game_config.background.floor)
 	k2.destroy_texture(game_config.background.wall)
 	k2.destroy_texture(game_config.background.window)
+
+	k2.destroy_texture(game_config.hud.lives_sprite)
 
 	// TODO: This should be organized similar to items
 	k2.destroy_sound(game_config.sounds.catch_good)
