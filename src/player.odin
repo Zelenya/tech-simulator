@@ -17,6 +17,7 @@ Player :: struct {
 	x, y:          f32,
 	width, height: f32,
 	moving:        Moving,
+	facing:        Moving,
 	squash_timer:  f32,
 	// TODO
 	// hitbox_offset: k2.Vec2,
@@ -30,6 +31,7 @@ player_init :: proc(config: PlayerConfig) -> Player {
 		y = screen.y - config.height - 8,
 		width = config.width,
 		height = config.height,
+		facing = .Right,
 		squash_timer = 0,
 	}
 }
@@ -42,21 +44,30 @@ player_update :: proc(config: PlayerConfig, player: ^Player, has_caught: bool, d
 		player.squash_timer = SQUASH_TIME
 	}
 
+	old_x := player.x
+	player.moving = .Idle
+
 	mouse := game_mouse_position()
 	mouse_delta := k2.get_mouse_delta()
 	if mouse_delta.x != 0 {
-		player.moving = .Left if mouse_delta.x < 0 else .Right
 		player.x = mouse.x - config.width / 2
 	}
 	if k2.key_is_held(.Left) {
-		player.moving = .Left
 		player.x -= config.speed * dt
 	}
 	if k2.key_is_held(.Right) {
-		player.moving = .Right
 		player.x += config.speed * dt
 	}
 	player.x = clamp(player.x, 0, screen.x - config.width)
+
+	delta_x := player.x - old_x
+	if delta_x < -0.1 {
+		player.moving = .Left
+		player.facing = .Left
+	} else if delta_x > 0.1 {
+		player.moving = .Right
+		player.facing = .Right
+	}
 }
 
 player_draw :: proc(player: Player, config: PlayerConfig) {
@@ -79,7 +90,7 @@ player_draw :: proc(player: Player, config: PlayerConfig) {
 
 	source := k2.get_texture_rect(config.sprite)
 	// TODO: Until we have better sprites, that'll do
-	if player.moving == .Left do source.w = -source.w
+	if player.facing == .Left do source.w = -source.w
 
 	// k2.draw_rect_outline(player_box, 1, k2.RED) // test hit box
 	k2.draw_texture_fit(config.sprite, source, player_box)

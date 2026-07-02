@@ -125,8 +125,9 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 			}
 		}
 	}
+	// TODO: This could return new location that we can pass down for effects
 	player_update(config.player, &session.player, caught, dt)
-	effects_update(&session.effects, dt)
+	effects_update(config.effects, session.player, &session.effects, dt)
 
 	if session.lives <= 0 {
 		k2.play_sound(config.sounds.game_over)

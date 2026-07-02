@@ -60,6 +60,7 @@ EffectsConfig :: struct {
 	flashing_lifetime:   f32,
 	flashing_speed:      f32,
 	full_flash_duration: f32,
+	dust_timer:          f32,
 	particle_count:      u32,
 	particle_lifetime:   f32,
 	particle_size:       f32,
@@ -236,9 +237,13 @@ parse_effects_config :: proc(config: EffectsConfig) -> EffectsConfig {
 		fmt.eprintln("Invalid flashing effects config: lifetime and speed must be positive")
 		panic("Invalid effects config")
 	}
-	if config.flashing_lifetime <= 0 || config.flashing_speed <= 0 {
+	if config.dust_timer <= 0 ||
+	   config.particle_count <= 0 ||
+	   config.particle_lifetime <= 0 ||
+	   config.particle_size <= 0 ||
+	   config.particle_speed <= 0 {
 		fmt.eprintln(
-			"Invalid particle effects config: lifetime, speed, and count must be positive",
+			"Invalid particle effects config: timer, lifetime, speed, and count must be positive",
 		)
 		panic("Invalid effects config")
 	}

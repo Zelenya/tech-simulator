@@ -14,6 +14,7 @@
     "flashing_lifetime": 0.3,
     "flashing_speed": 10,
     "full_flash_duration": 0.05,
+    "dust_timer": 0.2,
     "particle_count": 8,
     "particle_lifetime": 0.5,
     "particle_size": 10,

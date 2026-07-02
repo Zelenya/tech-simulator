@@ -8,6 +8,7 @@ import "core:math/rand"
 Effects :: struct {
 	shake_is_active:   bool,
 	shake_elapsed:     f32,
+	dust_timer:        f32,
 	flash_color:       Maybe(k2.Color),
 	flash_timer:       f32,
 	floating_texts:    [16]FloatingText,
@@ -22,12 +23,13 @@ Effects :: struct {
 // TODO: Also needs better pools
 effects_init :: proc(allocator: runtime.Allocator, config: EffectsConfig) -> Effects {
 	empty: [16]FloatingText
-	// TODO: Pass active from difficulty config
-	max_particles := 5 * config.particle_count
+	// TODO: Pass active from difficulty config + dust (lifetime vs timer)
+	max_particles := 5 * config.particle_count + 20
 
 	return Effects {
 		shake_is_active = false,
 		shake_elapsed = 0,
+		dust_timer = 0,
 		flash_color = nil,
 		flash_timer = 0,
 		score_base = 1,
@@ -46,9 +48,10 @@ effects_set_hit :: proc(config: EffectsConfig, effects: ^Effects, v2: bool) {
 	effects.flash_timer = config.full_flash_duration
 }
 
-effects_update :: proc(effects: ^Effects, dt: f32) {
+effects_update :: proc(config: EffectsConfig, player: Player, effects: ^Effects, dt: f32) {
 	floating_text_pool_update(&effects.floating_texts, dt)
 	flash_update(effects, dt)
+	particle_dust_update(config, player, effects, dt)
 	particle_pool_update(&effects.particle_pool, dt)
 	shake_update(effects, dt)
 }
@@ -190,6 +193,56 @@ Particle :: struct {
 	color:    k2.Color,
 }
 
+particle_dust_update :: proc(config: EffectsConfig, player: Player, effects: ^Effects, dt: f32) {
+	effects.dust_timer -= dt
+	if effects.dust_timer <= 0 {
+		y := player.y + player.height - 10 // bumped to the wheel height
+		switch player.moving {
+		case .Left:
+			pos: k2.Vec2 = {player.x + player.width, y}
+			// TODO: Make configurable
+			for _ in 0 ..< 3 {
+				vx := rand.float32_range(0, config.particle_speed)
+				particle_dust_spawn(config, &effects.particle_pool, pos, vx)
+			}
+		case .Right:
+			pos: k2.Vec2 = {player.x, y}
+			for _ in 0 ..< 3 {
+				vx := rand.float32_range(-config.particle_speed, 0)
+				particle_dust_spawn(config, &effects.particle_pool, pos, vx)
+			}
+		case .Idle:
+		}
+		effects.dust_timer = config.dust_timer
+	}
+}
+
+// TODO: unify with particles_spawn_one
+particle_dust_spawn :: proc(
+	config: EffectsConfig,
+	particle_pool: ^[]Particle,
+	pos: k2.Vec2,
+	vx: f32,
+) {
+	for &spot in particle_pool {
+		if !spot.active {
+			spot.x = pos.x + rand.float32_range(-4, 4)
+			spot.y = pos.y + rand.float32_range(-3, 3)
+			spot.vx = vx * rand.float32_range(0.2, 0.8)
+			spot.vy = -rand.float32_range(0.1 * config.particle_speed, 0.3 * config.particle_speed)
+			spot.lifetime = rand.float32_range(
+				0.5 * config.particle_lifetime,
+				config.particle_lifetime,
+			)
+			spot.elapsed = 0
+			spot.active = true
+			spot.color = k2.color_alpha(k2.WHITE, 210) // TODO: Brown?
+			spot.size = rand.float32_range(0.3 * config.particle_size, 0.7 * config.particle_size)
+			return
+		}
+	}
+}
+
 particle_pool_update :: proc(particle_pool: ^[]Particle, dt: f32) {
 	for &particle in particle_pool {
 		if particle.active {
@@ -230,5 +283,8 @@ particles_spawn_one :: proc(config: EffectsConfig, particle_pool: ^[]Particle, p
 }
 
 particle_draw :: proc(particle: Particle) {
-	k2.draw_rect({particle.x, particle.y, particle.size, particle.size}, particle.color)
+	alpha := 1.0 - particle.elapsed / particle.lifetime
+	color := particle.color
+	color[3] = u8(alpha * f32(particle.color[3]))
+	k2.draw_rect({particle.x, particle.y, particle.size, particle.size}, color)
 }
