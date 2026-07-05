@@ -8,11 +8,6 @@ Moving :: enum {
 	Right,
 }
 
-// TODO: not sure if we need those if we use a different frame on catch
-SQUASH_SCALE_X: f32 : 1.1
-SQUASH_SCALE_Y: f32 : 0.9
-SQUASH_TIME: f32 : 0.5
-
 Player :: struct {
 	x, y:          f32,
 	width, height: f32,
@@ -28,7 +23,7 @@ player_init :: proc(config: PlayerConfig) -> Player {
 	screen := game_screen_size()
 	return Player {
 		x = screen.x / 2 - config.width / 2,
-		y = screen.y - config.height - 8,
+		y = screen.y - config.height - config.floor_offset,
 		width = config.width,
 		height = config.height,
 		facing = .Right,
@@ -41,7 +36,7 @@ player_update :: proc(config: PlayerConfig, player: ^Player, has_caught: bool, d
 
 	if player.squash_timer > 0 do player.squash_timer -= dt
 	if has_caught {
-		player.squash_timer = SQUASH_TIME
+		player.squash_timer = config.squash_time
 	}
 
 	old_x := player.x
@@ -82,9 +77,9 @@ player_draw :: proc(player: Player, config: PlayerConfig) {
 
 	// TODO: Proper animation frame
 	if player.squash_timer > 0 {
-		squashed_h := player_box.h * SQUASH_SCALE_Y
+		squashed_h := player_box.h * config.squash_scale_y
 		player_box.y += player_box.h - squashed_h
-		player_box.w *= SQUASH_SCALE_X
+		player_box.w *= config.squash_scale_x
 		player_box.h = squashed_h
 	}
 

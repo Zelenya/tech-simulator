@@ -242,7 +242,7 @@ item_draw :: proc(
 		h = scale_h,
 	}
 
-	#partial switch item.state {
+	switch item.state {
 	case .Inactive:
 		break
 	case .Falling:

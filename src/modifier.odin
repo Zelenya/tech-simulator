@@ -1,7 +1,6 @@
 package game
 
 import k2 "../karl2d"
-import "core:fmt"
 import "core:math/rand"
 
 // TODO: Split enum?
@@ -34,46 +33,63 @@ ModifierKind :: enum {
 	Continue,
 }
 
-// TODO: Make effect configurable
 modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: ModifierKind) {
+	effects := config.modifier_effects
+
 	switch modifier {
 	case .Prestige:
-		session.effects.preference = .Faang
+		session.effects.preference = effects.prestige_preference_item
 	case .TechStack:
-		session.effects.preference = .FireStack
+		session.effects.preference = effects.tech_stack_preference_item
 	case .Compensation:
-		session.effects.preference = .BigMoney
+		session.effects.preference = effects.compensation_preference_item
 	case .RemoteWork:
-		session.effects.preference = .Remote
+		session.effects.preference = effects.remote_work_preference_item
 
 	case .AddPetProject: // TODO
 	case .AskForReferral:
 		// We update preferences on the prev. wave, player should always have one
 		item_to_boost, ok := session.effects.preference.?
-		if ok do item_catalog_update_weight(&session.item_catalog, item_to_boost, 3)
+		if ok {
+			item_catalog_update_weight(
+				&session.item_catalog,
+				item_to_boost,
+				effects.ask_for_referral_weight_multiplier,
+			)
+		}
 	case .FileUnemployment:
-		session.lives += 1
+		session.lives += effects.file_unemployment_lives_delta
 	case .GiveConferenceTalk:
-		session.effects.good_catch_margin += config.player.width * 0.2
-		session.effects.good_catch_magnet *= 1.2
+		session.effects.good_catch_margin +=
+			config.player.width * effects.give_conference_talk_margin_multiplier
+		session.effects.good_catch_magnet *= effects.give_conference_talk_magnet_multiplier
 	case .HiringFreeze:
 		// This conflicst with wave bumps?
-		session.item_pool.setting_item_speed *= 0.6
+		session.item_pool.setting_item_speed *= effects.hiring_freeze_item_speed_multiplier
 
 	case .Burnout:
-		session.item_pool.setting_item_speed *= 1.5
-		session.effects.score_base *= 3
+		session.item_pool.setting_item_speed *= effects.burnout_item_speed_multiplier
+		session.effects.score_base *= effects.burnout_score_base_multiplier
 	case .LeetCodeGrind: // TODO
 	case .LowerQualityBar:
-		item_catalog_update_good_to_bad_ratio(&session.item_catalog, 1.5)
+		item_catalog_update_good_to_bad_ratio(
+			&session.item_catalog,
+			effects.lower_quality_bar_ratio_multiplier,
+		)
 		// TODO: Should this be gated for people with one life?
-		session.lives -= 1
+		session.lives += effects.lower_quality_bar_lives_delta
 	case .TightenCV:
-		item_catalog_update_good_to_bad_ratio(&session.item_catalog, 0.5)
-		session.effects.score_base *= 5
+		item_catalog_update_good_to_bad_ratio(
+			&session.item_catalog,
+			effects.tighten_cv_ratio_multiplier,
+		)
+		session.effects.score_base *= effects.tighten_cv_score_base_multiplier
 	case .SprayAndPray:
-		item_catalog_update_good_to_bad_ratio(&session.item_catalog, 1.3)
-		session.effects.score_base /= 4
+		item_catalog_update_good_to_bad_ratio(
+			&session.item_catalog,
+			effects.spray_and_pray_ratio_multiplier,
+		)
+		session.effects.score_base /= effects.spray_and_pray_score_base_divisor
 
 	case .AutomatePipeline: // TODO
 	case .BlindApplication: // TODO
@@ -86,72 +102,20 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 	}
 }
 
-// TODO: How much should this be in config vs. drawn?
-modifier_label :: proc(kind: ModifierKind) -> string {
-	switch kind {
-	case .Prestige:
-		return "Prestige"
-	case .TechStack:
-		return "Interesting tech"
-	case .Compensation:
-		return "Compensation"
-	case .RemoteWork:
-		return "Remote"
-
-	case .AddPetProject:
-		return "Bonus item every 5 catches"
-	case .AskForReferral:
-		return "Ask for referrals"
-	case .FileUnemployment:
-		return "Get extra life"
-	case .GiveConferenceTalk:
-		return "Get wider + magnet"
-	case .HiringFreeze:
-		return "Hiring freeze"
-
-	case .Burnout:
-		return "faster items, x2 points"
-	case .LeetCodeGrind:
-		return "less bad items, but good move erratically"
-	case .LowerQualityBar:
-		return "more good items, -1 life"
-	case .TightenCV:
-		return "x3 bad items, x5 points"
-	case .SprayAndPray:
-		return "x1.5 good items, 1/3 points"
-
-	case .AutomatePipeline:
-		return "fast and slow"
-	case .BlindApplication:
-		return "hide stuff"
-	case .GiveUp:
-		return "loose lifes every 1 min"
-	case .RecruiterSpam:
-		return "spam"
-	case .ImposterSyndrom:
-		return "hide the score"
-
-	case .Bonus:
-		return "Accept the challenge"
-	case .Continue:
-		return "I'm not ready"
-	}
-	return "idk"
-}
-
 ModifierOptions :: struct {
 	options:  [3]ModifierCard,
 	selected: int,
 }
 
 ModifierCard :: struct {
-	kind:  ModifierKind,
-	label: string, // TODO: title + description
-	card:  k2.Rect,
+	kind:        ModifierKind,
+	title:       string,
+	description: string,
+	card:        k2.Rect,
 }
 
-modifier_pick_init :: proc(cards_config: CardsConfig, session: Session) -> ModifierOptions {
-	fmt.printfln("Wave: %v", session.current_wave)
+modifier_pick_init :: proc(config: GameConfig, session: Session) -> ModifierOptions {
+	cards_config := config.cards
 	screen := game_screen_size()
 
 	total_width := cards_config.width * 3 + cards_config.gap * 2
@@ -164,45 +128,25 @@ modifier_pick_init :: proc(cards_config: CardsConfig, session: Session) -> Modif
 	}
 
 	option_cards: [3]ModifierCard
-	// TODO: Improve randomness and make level dependend
-	for option, i in modifiers_pick(session.current_wave) {
+	for option, i in modifiers_pick(config, session.current_wave) {
+		def := config.modifiers.by_kind[option]
 		option_cards[i] = {
-			kind  = option,
-			label = modifier_label(option),
-			card  = to_card(cards_config, start_x, start_y, i),
+			kind        = option,
+			title       = def.title,
+			description = def.description,
+			card        = to_card(cards_config, start_x, start_y, i),
 		}
 	}
 
 	return ModifierOptions{options = option_cards, selected = 0}
 }
 
-// TODO: Is there a way to clean this up?
-// TODO: Tie it to the waves length
-modifier_packs := [5][]ModifierKind {
-	0 = []ModifierKind{.Prestige, .TechStack, .Compensation, .RemoteWork},
-	1 = []ModifierKind {
-		.AddPetProject,
-		.AskForReferral,
-		.FileUnemployment,
-		.GiveConferenceTalk,
-		.HiringFreeze,
-	},
-	2 = []ModifierKind{.Burnout, .LeetCodeGrind, .LowerQualityBar, .TightenCV, .SprayAndPray},
-	3 = []ModifierKind {
-		.AutomatePipeline,
-		.BlindApplication,
-		.GiveUp,
-		.RecruiterSpam,
-		.ImposterSyndrom,
-	},
-	// TODO: This isn't shown yet
-	4 = []ModifierKind{.Bonus, .Continue, .Bonus, .Continue},
-}
-
-modifiers_pick :: proc(wave: int) -> [3]ModifierKind {
-	for_wave := modifier_packs[wave]
-	rand.shuffle(for_wave[:])
-	return {for_wave[0], for_wave[1], for_wave[2]}
+modifiers_pick :: proc(config: GameConfig, wave: int) -> [3]ModifierKind {
+	for_wave := config.waves[wave].modifiers
+	options := make([]ModifierKind, len(for_wave), context.temp_allocator)
+	copy(options, for_wave)
+	rand.shuffle(options[:])
+	return {options[0], options[1], options[2]}
 }
 
 // TODO: Should modifier own waves? or make wave.odin that owns game+modifiers
@@ -216,7 +160,11 @@ modifier_pick_update :: proc(
 ) -> GameState {
 	if k2.key_went_down(.Left) do modifier_options.selected -= 1
 	if k2.key_went_down(.Right) do modifier_options.selected += 1
-	modifier_options.selected = clamp(modifier_options.selected, 0, len(Difficulty))
+	modifier_options.selected = clamp(
+		modifier_options.selected,
+		0,
+		len(modifier_options.options) - 1,
+	)
 
 	mouse := game_mouse_position()
 	for option, i in modifier_options.options {
@@ -245,7 +193,7 @@ wave_next :: proc(
 	modifier: ModifierKind,
 	dt: f32,
 ) -> GameState {
-	k2.play_sound(config.sounds.wave_next)
+	k2.play_sound(config.sounds.by_kind[.WaveNext])
 	// TODO: Similar check is duplicate in game loop
 	session.current_wave = min(session.current_wave + 1, len(config.waves) - 1)
 	session.wave_timer = 0
@@ -264,15 +212,15 @@ wave_next :: proc(
 
 // TODO: Should we re-use menu card drawing code?
 modifier_pick_draw :: proc(cards_config: CardsConfig, modifier_options: ModifierOptions) {
-	for difficulty, i in modifier_options.options {
+	for option, i in modifier_options.options {
 		color := k2.GREEN if int(i) == modifier_options.selected else k2.GRAY
-		k2.draw_rect(difficulty.card, color)
+		k2.draw_rect(option.card, color)
 
 		// TODO: this could be calc'ed ones inside card too (and looks bad now)
-		text_size := k2.measure_text(difficulty.label, 50)
-		text_x := difficulty.card.x + (cards_config.width / 2) - (text_size.x / 2)
-		text_y := difficulty.card.y + cards_config.height + 20
+		text_size := k2.measure_text(option.title, 50)
+		text_x := option.card.x + (cards_config.width / 2) - (text_size.x / 2)
+		text_y := option.card.y + cards_config.height + 20
 
-		k2.draw_text(difficulty.label, {text_x, text_y}, 50, color)
+		k2.draw_text(option.title, {text_x, text_y}, 50, color)
 	}
 }

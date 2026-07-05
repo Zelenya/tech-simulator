@@ -30,7 +30,7 @@ game_init :: proc(
 	config: GameConfig,
 	difficulty: Difficulty,
 ) -> Session {
-	settings := set_difficulty(difficulty)
+	settings := config.difficulties[difficulty]
 
 	return Session {
 		player = player_init(config.player),
@@ -78,7 +78,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 				if item_is_good(def) {
 					effects_set_hit(config.effects, &session.effects, v2 = true)
 					// TODO: Consider different sound
-					k2.play_sound(config.sounds.catch_bad)
+						k2.play_sound(config.sounds.by_kind[.CatchBad])
 					session.lives -= 1
 					session.combo = 0
 				}
@@ -90,7 +90,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 			switch effect in def.effect {
 			case GoodItemCaught:
 				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
-					k2.play_sound(config.sounds.catch_good)
+						k2.play_sound(config.sounds.by_kind[.CatchGood])
 					multiplier := get_multiplier(session.effects, session.combo, item.kind)
 					// TODO: We should pass something closer to collision's x,y
 					floating_text_spawn(
@@ -108,7 +108,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 				}
 			case BadItemCaught:
 				if (has_collision(session.player, item)) {
-					k2.play_sound(config.sounds.catch_bad)
+						k2.play_sound(config.sounds.by_kind[.CatchBad])
 					item_remove(&session.item_pool, &item)
 					// TODO: Improve position passing (maybe trigger particles somewhere else)
 					particles_spawn(
@@ -130,7 +130,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	effects_update(config.effects, session.player, &session.effects, dt)
 
 	if session.lives <= 0 {
-		k2.play_sound(config.sounds.game_over)
+		k2.play_sound(config.sounds.by_kind[.GameOver])
 		return .GameOver
 	} else {return .Playing}
 }
@@ -164,7 +164,7 @@ game_draw :: proc(config: GameConfig, session: Session) {
 	player_draw(session.player, config.player)
 	for &item in session.item_pool.items {
 		item_draw(config.effects, config.items[item.kind], session.effects, item)}
-	effects_draw(session.effects)
+	effects_draw(config.effects, session.effects)
 
 	// lives
 	// TODO: Move to the right and draw in other direction
@@ -197,22 +197,33 @@ game_draw :: proc(config: GameConfig, session: Session) {
 
 game_background_draw :: proc(config: BackgroundConfig) {
 	screen := game_screen_size()
-	size := config.size
+	floor := config.pieces[.Floor]
+	wall := config.pieces[.Wall]
+	window := config.pieces[.Window]
 
-	cols := int(screen.x / size) + 1
-	rows := int(screen.y / size) + 1
+	floor_cols := int(screen.x / floor.width) + 1
+	for x in 0 ..< floor_cols {
+		rect := k2.Rect {
+			x = f32(x) * floor.width,
+			y = screen.y - floor.height,
+			w = floor.width,
+			h = floor.height,
+		}
+		k2.draw_texture_fit(floor.texture, k2.get_texture_rect(floor.texture), rect)
+	}
 
-	for row in 0 ..< rows {
-		y := screen.y - size - f32(row) * size
-		texture := config.floor if row == 0 else config.wall
-		for x in 0 ..< cols {
+	wall_cols := int(screen.x / wall.width) + 1
+	wall_rows := int((screen.y - floor.height) / wall.height) + 1
+	for row in 0 ..< wall_rows {
+		y := screen.y - floor.height - wall.height - f32(row) * wall.height
+		for x in 0 ..< wall_cols {
 			rect := k2.Rect {
-				x = f32(x) * size,
+				x = f32(x) * wall.width,
 				y = y,
-				w = size,
-				h = size,
+				w = wall.width,
+				h = wall.height,
 			}
-			k2.draw_texture_fit(texture, k2.get_texture_rect(texture), rect)
+			k2.draw_texture_fit(wall.texture, k2.get_texture_rect(wall.texture), rect)
 		}
 	}
 
@@ -221,11 +232,11 @@ game_background_draw :: proc(config: BackgroundConfig) {
 		window_rect := k2.Rect {
 			x = f32(300 * i),
 			y = f32(100 * i),
-			w = size,
-			h = size,
+			w = window.width,
+			h = window.height,
 		}
 
-		k2.draw_texture_fit(config.window, k2.get_texture_rect(config.window), window_rect)
+		k2.draw_texture_fit(window.texture, k2.get_texture_rect(window.texture), window_rect)
 	}
 
 }

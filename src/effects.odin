@@ -24,7 +24,7 @@ Effects :: struct {
 effects_init :: proc(allocator: runtime.Allocator, config: EffectsConfig) -> Effects {
 	empty: [16]FloatingText
 	// TODO: Pass active from difficulty config + dust (lifetime vs timer)
-	max_particles := 5 * config.particle_count + 20
+	max_particles := 5 * (config.particle_count + config.dust_particle_count) + 20
 
 	return Effects {
 		shake_is_active = false,
@@ -49,11 +49,11 @@ effects_set_hit :: proc(config: EffectsConfig, effects: ^Effects, v2: bool) {
 }
 
 effects_update :: proc(config: EffectsConfig, player: Player, effects: ^Effects, dt: f32) {
-	floating_text_pool_update(&effects.floating_texts, dt)
+	floating_text_pool_update(config, &effects.floating_texts, dt)
 	flash_update(effects, dt)
 	particle_dust_update(config, player, effects, dt)
 	particle_pool_update(&effects.particle_pool, dt)
-	shake_update(effects, dt)
+	shake_update(config, effects, dt)
 }
 
 effects_reset :: proc(effects: Effects) {
@@ -62,10 +62,10 @@ effects_reset :: proc(effects: Effects) {
 	}
 }
 
-effects_draw :: proc(effects: Effects) {
+effects_draw :: proc(config: EffectsConfig, effects: Effects) {
 	flash_draw(effects)
 	for text in effects.floating_texts {
-		if text.active do floating_text_draw(text)
+		if text.active do floating_text_draw(config, text)
 	}
 
 	for particle in effects.particle_pool {
@@ -84,9 +84,6 @@ get_combo_multiplier :: proc(combo: u32) -> u32 {
 	return 1.0 + combo / 10
 }
 
-// TODO: Add to config
-FLOATING_TEXT_LIFETIME: f32 : 1
-
 // TODO: Might need to do floating hearts too
 FloatingText :: struct {
 	x, y:       f32,
@@ -97,12 +94,16 @@ FloatingText :: struct {
 }
 
 // TODO: Currently, if we get more than 16 notifications, we won't show anything (ok for now)
-floating_text_pool_update :: proc(floating_text_pool: ^[16]FloatingText, dt: f32) {
+floating_text_pool_update :: proc(
+	config: EffectsConfig,
+	floating_text_pool: ^[16]FloatingText,
+	dt: f32,
+) {
 	for &text in floating_text_pool {
 		if text.active {
 			text.elapsed += dt
-			text.y -= 10 * dt
-			if text.elapsed > FLOATING_TEXT_LIFETIME do text.active = false
+			text.y -= config.floating_text_speed * dt
+			if text.elapsed > config.floating_text_lifetime do text.active = false
 		}
 	}
 }
@@ -128,7 +129,7 @@ floating_text_spawn :: proc(
 }
 
 // TODO: Pass the score as int or something and use it to manipulate the size (and color)
-floating_text_draw :: proc(floating_text: FloatingText) {
+floating_text_draw :: proc(config: EffectsConfig, floating_text: FloatingText) {
 	text: string
 	if floating_text.multiplier == 1 {
 		text = fmt.tprintf("+%d", floating_text.points)
@@ -136,14 +137,14 @@ floating_text_draw :: proc(floating_text: FloatingText) {
 		text = fmt.tprintf("+%d x%d", floating_text.points, floating_text.multiplier)
 	}
 
-	text_width := k2.measure_text(text, 20).x
+	text_width := k2.measure_text(text, config.floating_text_size).x
 	text_x := floating_text.x - (text_width / 2)
 
-	alpha := 1.0 - floating_text.elapsed / FLOATING_TEXT_LIFETIME
+	alpha := 1.0 - floating_text.elapsed / config.floating_text_lifetime
 	faded_green := k2.GREEN
 	faded_green[3] = u8(alpha * 255)
 
-	k2.draw_text(text, {text_x, floating_text.y}, 20, faded_green)
+	k2.draw_text(text, {text_x, floating_text.y}, config.floating_text_size, faded_green)
 }
 
 flash_update :: proc(effects: ^Effects, dt: f32) {
@@ -160,26 +161,23 @@ flash_draw :: proc(effects: Effects) {
 	}
 }
 
-SHAKE_DURATION: f32 : 0.5
-SHAKE_STRENGTH: f32 : 10
-
-shake_update :: proc(effects: ^Effects, dt: f32) {
+shake_update :: proc(config: EffectsConfig, effects: ^Effects, dt: f32) {
 	if effects.shake_is_active {
 		effects.shake_elapsed += dt
-		if effects.shake_elapsed >= SHAKE_DURATION {
+		if effects.shake_elapsed >= config.shake_duration {
 			effects.shake_is_active = false
 			effects.shake_elapsed = 0
 		}
 
-		offset := shake_offset(effects^)
+		offset := shake_offset(config, effects^)
 		set_game_camera(offset)
 	}
 }
 
-shake_offset :: proc(effects: Effects) -> k2.Vec2 {
+shake_offset :: proc(config: EffectsConfig, effects: Effects) -> k2.Vec2 {
 	if !effects.shake_is_active do return {0, 0}
-	t := effects.shake_elapsed / SHAKE_DURATION
-	strength := SHAKE_STRENGTH * (1.0 - t)
+	t := effects.shake_elapsed / config.shake_duration
+	strength := config.shake_strength * (1.0 - t)
 	return {rand.float32_range(-strength, strength), rand.float32_range(-strength, strength)}
 }
 
@@ -196,18 +194,18 @@ Particle :: struct {
 particle_dust_update :: proc(config: EffectsConfig, player: Player, effects: ^Effects, dt: f32) {
 	effects.dust_timer -= dt
 	if effects.dust_timer <= 0 {
-		y := player.y + player.height - 10 // bumped to the wheel height
+		// TODO: Switch to player floor offset when we have final sprite?
+		y := player.y + player.height - config.dust_floor_offset
 		switch player.moving {
 		case .Left:
 			pos: k2.Vec2 = {player.x + player.width, y}
-			// TODO: Make configurable
-			for _ in 0 ..< 3 {
+			for _ in 0 ..< config.dust_particle_count {
 				vx := rand.float32_range(0, config.particle_speed)
 				particle_dust_spawn(config, &effects.particle_pool, pos, vx)
 			}
 		case .Right:
 			pos: k2.Vec2 = {player.x, y}
-			for _ in 0 ..< 3 {
+			for _ in 0 ..< config.dust_particle_count {
 				vx := rand.float32_range(-config.particle_speed, 0)
 				particle_dust_spawn(config, &effects.particle_pool, pos, vx)
 			}
@@ -226,18 +224,26 @@ particle_dust_spawn :: proc(
 ) {
 	for &spot in particle_pool {
 		if !spot.active {
-			spot.x = pos.x + rand.float32_range(-4, 4)
-			spot.y = pos.y + rand.float32_range(-3, 3)
-			spot.vx = vx * rand.float32_range(0.2, 0.8)
-			spot.vy = -rand.float32_range(0.1 * config.particle_speed, 0.3 * config.particle_speed)
+			spot.x = pos.x + rand.float32_range(-config.dust_x_jitter, config.dust_x_jitter)
+			spot.y = pos.y + rand.float32_range(-config.dust_y_jitter, config.dust_y_jitter)
+			spot.vx =
+				vx *
+				rand.float32_range(config.dust_vx_min_multiplier, config.dust_vx_max_multiplier)
+			spot.vy = -rand.float32_range(
+				config.dust_vy_min_multiplier * config.particle_speed,
+				config.dust_vy_max_multiplier * config.particle_speed,
+			)
 			spot.lifetime = rand.float32_range(
-				0.5 * config.particle_lifetime,
+				config.dust_lifetime_min_multiplier * config.particle_lifetime,
 				config.particle_lifetime,
 			)
 			spot.elapsed = 0
 			spot.active = true
 			spot.color = k2.color_alpha(k2.WHITE, 210) // TODO: Brown?
-			spot.size = rand.float32_range(0.3 * config.particle_size, 0.7 * config.particle_size)
+			spot.size = rand.float32_range(
+				config.dust_size_min_multiplier * config.particle_size,
+				config.dust_size_max_multiplier * config.particle_size,
+			)
 			return
 		}
 	}
@@ -270,13 +276,16 @@ particles_spawn_one :: proc(config: EffectsConfig, particle_pool: ^[]Particle, p
 			spot.vx = rand.float32_range(-config.particle_speed, config.particle_speed)
 			spot.vy = rand.float32_range(-config.particle_speed, config.particle_speed)
 			spot.lifetime = rand.float32_range(
-				0.2 * config.particle_lifetime,
+				config.particle_lifetime_min_multiplier * config.particle_lifetime,
 				config.particle_lifetime,
 			)
 			spot.elapsed = 0
 			spot.active = true
 			spot.color = k2.WHITE // TODO: Should the color be random? should it fade out?
-			spot.size = rand.float32_range(0, config.particle_size)
+			spot.size = rand.float32_range(
+				config.particle_size_min_multiplier * config.particle_size,
+				config.particle_size,
+			)
 			return
 		}
 	}
