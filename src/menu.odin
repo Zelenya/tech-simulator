@@ -78,17 +78,50 @@ menu_update :: proc(menu: ^Menu, dt: f32) -> GameState {
 	return GameState.Title
 }
 
-menu_draw :: proc(cards_config: CardsConfig, menu: Menu) {
+menu_draw :: proc(cards_config: CardsConfig, fonts_config: FontsConfig, menu: Menu) {
+	font := fonts_config.by_kind[.H1]
+
 	for difficulty, i in menu.difficulty_cards {
-		color := k2.GREEN if int(i) == menu.selected else k2.GRAY
-		k2.draw_rect(difficulty.card, color)
+		source := k2.get_texture_rect(cards_config.sprite)
+		k2.draw_texture_fit(cards_config.sprite, source, difficulty.card)
 
-		// TODO: this could be calc'ed ones inside card too
-		text_size := k2.measure_text(difficulty.label, 50)
-		text_x := difficulty.card.x + (cards_config.width / 2) - (text_size.x / 2)
-		text_y := difficulty.card.y + cards_config.height + 20
+		// TODO: It should hover up with sound
+		color := k2.GREEN if int(i) == menu.selected else k2.BLACK
+		if int(i) == menu.selected {
+			k2.draw_rect_outline(difficulty.card, 5, k2.color_alpha(color, 200))
+		}
 
-		k2.draw_text(difficulty.label, {text_x, text_y}, 50, color)
+		text_width := cards_config.width - cards_config.title_box.x_margin * 2
+		// TODO: Should be done once, not on each draw
+		fitting_font_size, fitting_text_size := fit_text_into_box(
+			difficulty.label,
+			text_width,
+			cards_config.title_box.height,
+			font.font,
+			font.size,
+		)
+
+		// k2.draw_rect_outline(test, 5, k2.RED)
+
+		box_position :=
+			k2.rect_top_left(difficulty.card) +
+			{cards_config.title_box.x_margin, cards_config.title_box.top_y}
+		box_size := k2.Vec2{text_width, cards_config.title_box.height}
+		text_pos := box_position + box_size / 2 - fitting_text_size / 2
+
+		k2.draw_text(difficulty.label, text_pos, f32(fitting_font_size), k2.BLACK, font.font)
+	}
+}
+
+fit_text_into_box :: proc(text: string, w, h: f32, font: k2.Font, size: int) -> (int, k2.Vec2) {
+	// Safety net
+	if size <= 2 do return 2, {w, h}
+
+	text_size := k2.measure_text(text, f32(size), font)
+	if text_size.x <= w && text_size.y <= h {
+		return size, text_size
+	} else {
+		return fit_text_into_box(text, w, h, font, size - 2)
 	}
 }
 

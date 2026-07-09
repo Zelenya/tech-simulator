@@ -20,9 +20,20 @@
     }
   ],
   "cards": {
-    "width": 225,
-    "height": 400,
-    "gap": 50
+    "gap": 50,
+    "sprite": "card-full-test",
+    "width": 300,
+    "height": 500,
+    "title_box": {
+      "x_margin": 50,
+      "top_y": 15,
+      "height": 44
+    },
+    "description_box": {
+      "x_margin": 20,
+      "bottom_y": -150,
+      "height": 130
+    }
   },
   "difficulties": [
     {
@@ -78,6 +89,18 @@
     "particle_size_min_multiplier": 0,
     "particle_speed": 100
   },
+  "fonts": [
+    {
+      "kind": "h1",
+      "size": 20,
+      "font": "PressStart2P"
+    },
+    {
+      "kind": "p",
+      "size": 30,
+      "font": "PixelifySans"
+    }
+  ],
   "hud": {
     "margin": 20,
     "lives_sprite": "life",
@@ -338,7 +361,7 @@
     {
       "spawn_multiplier": 1.0,
       "speed_multiplier": 1.0,
-      "duration": 10,
+      "duration": 2,
       "modifiers": ["prestige", "tech-stack", "compensation", "remote-work"]
     },
     {

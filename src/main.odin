@@ -19,11 +19,11 @@ main :: proc() {
 		k2.clear(k2.LIGHT_BLUE)
 		set_game_camera()
 
-			if game_config_reload(memory.config, &config) {
-				switch game_state {
-				case .Title:
-					menu = menu_init(config.cards, config.difficulties)
-				case .Playing, .Pause:
+		if game_config_reload(memory.config, &config) {
+			switch game_state {
+			case .Title:
+				menu = menu_init(config.cards, config.difficulties)
+			case .Playing, .Pause:
 				game_reload(config, &session)
 			case .ModifierPick:
 				game_reload(config, &session)
@@ -40,7 +40,7 @@ main :: proc() {
 				session = game_init(memory.session, config, Difficulty(menu.selected))
 				game_state = next_state
 			} else {
-				menu_draw(config.cards, menu)
+				menu_draw(config.cards, config.fonts, menu)
 			}
 		case .Playing:
 			next_state := game_update(config, &session, dt)
@@ -52,7 +52,7 @@ main :: proc() {
 			effects_reset(session.effects)
 		case .ModifierPick:
 			game_state = modifier_pick_update(config, &session, &modifier_options, dt)
-			modifier_pick_draw(config.cards, modifier_options)
+			modifier_pick_draw(config.cards, config.fonts, modifier_options)
 		case .Pause:
 			game_state = pause_update()
 			pause_draw(session)

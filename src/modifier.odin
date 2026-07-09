@@ -2,6 +2,7 @@ package game
 
 import k2 "../karl2d"
 import "core:math/rand"
+import "core:strings"
 
 // TODO: Split enum?
 ModifierKind :: enum {
@@ -211,16 +212,116 @@ wave_next :: proc(
 }
 
 // TODO: Should we re-use menu card drawing code?
-modifier_pick_draw :: proc(cards_config: CardsConfig, modifier_options: ModifierOptions) {
+modifier_pick_draw :: proc(
+	cards_config: CardsConfig,
+	fonts_config: FontsConfig,
+	modifier_options: ModifierOptions,
+) {
+	title_font := fonts_config.by_kind[.H1]
+	description_font := fonts_config.by_kind[.P]
+
 	for option, i in modifier_options.options {
-		color := k2.GREEN if int(i) == modifier_options.selected else k2.GRAY
-		k2.draw_rect(option.card, color)
+		source := k2.get_texture_rect(cards_config.sprite)
+		k2.draw_texture_fit(cards_config.sprite, source, option.card)
 
-		// TODO: this could be calc'ed ones inside card too (and looks bad now)
-		text_size := k2.measure_text(option.title, 50)
-		text_x := option.card.x + (cards_config.width / 2) - (text_size.x / 2)
-		text_y := option.card.y + cards_config.height + 20
+		color := k2.GREEN if int(i) == modifier_options.selected else k2.BLACK
 
-		k2.draw_text(option.title, {text_x, text_y}, 50, color)
+		if int(i) == modifier_options.selected {
+			k2.draw_rect_outline(option.card, 5, k2.color_alpha(color, 200))
+		}
+
+		// TODO: Could recalculate with just margin, remove width
+		title_text_width := cards_config.width - cards_config.title_box.x_margin * 2
+		// TODO: Should be done ones, not on each draw
+		title_font_size, title_text_size := fit_text_into_box(
+			option.title,
+			title_text_width,
+			cards_config.title_box.height,
+			title_font.font,
+			title_font.size,
+		)
+
+		box_position :=
+			k2.rect_top_left(option.card) +
+			{cards_config.title_box.x_margin, cards_config.title_box.top_y}
+		box_size := k2.Vec2{title_text_width, cards_config.title_box.height}
+		title_pos := box_position + box_size / 2 - title_text_size / 2
+		k2.draw_text(option.title, title_pos, f32(title_font_size), k2.BLACK, title_font.font)
+
+		description_text_width := cards_config.width - cards_config.description_box.x_margin * 2
+		// TODO: Should be done once, not on each draw
+		description_text, description_font_size, description_text_size := fit_text_into_box_wrap(
+			option.description,
+			description_text_width,
+			cards_config.description_box.height,
+			description_font.font,
+			description_font.size,
+		)
+
+		desc_box_position :=
+			k2.rect_bottom_left(option.card) +
+			{cards_config.description_box.x_margin, cards_config.description_box.bottom_y}
+		desc_box_size := k2.Vec2{description_text_width, cards_config.description_box.height}
+		description_pos := desc_box_position + desc_box_size / 2 - description_text_size / 2
+		k2.draw_text(
+			description_text,
+			description_pos,
+			f32(description_font_size),
+			k2.BLACK,
+			description_font.font,
+		)
 	}
+}
+
+MIN_FONT_SIZE :: 2
+
+// Try to fit word by word, and if it's not possible at the current font size, try with a smaller one
+fit_text_into_box_wrap :: proc(
+	text: string,
+	w, h: f32,
+	font: k2.Font,
+	initial_size: int,
+) -> (
+	string,
+	int,
+	k2.Vec2,
+) {
+	size := max(initial_size, MIN_FONT_SIZE)
+
+	for {
+		wrapped, wrapped_size := wrap_text(text, w, font, size)
+
+		// If doesn't fit, try again with a smaller font
+		if wrapped_size.x <= w && wrapped_size.y <= h || size == MIN_FONT_SIZE {
+			return wrapped, size, wrapped_size
+		}
+
+		size -= 1
+	}
+}
+
+// TODO: Should it short-circuit if it overflows on h mid-way?
+wrap_text :: proc(text: string, w: f32, font: k2.Font, size: int) -> (string, k2.Vec2) {
+	remaining := text
+	wrapped_text: string
+	wrapped_text_size: k2.Vec2
+
+	for word in strings.fields_iterator(&remaining) {
+		candidate := strings.concatenate(
+			{wrapped_text, len(wrapped_text) > 0 ? " " : "", word},
+			context.temp_allocator,
+		)
+		candidate_size := k2.measure_text(candidate, f32(size), font)
+
+		// If doesn't fit width-wise, try with this word on the next line
+		if candidate_size.x <= w {
+			wrapped_text = candidate
+			wrapped_text_size = candidate_size
+		} else {
+			wrapped_text = strings.concatenate({wrapped_text, "\n", word}, context.temp_allocator)
+			wrapped_text_size = k2.measure_text(wrapped_text, f32(size), font)
+		}
+	}
+
+	return wrapped_text, wrapped_text_size
 }

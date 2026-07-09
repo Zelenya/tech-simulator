@@ -10,34 +10,37 @@ import "core:reflect"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core:unicode/utf8"
 
+// TODO: There isn't much use for this left
 BaseConfig :: struct {
-	cards:            CardsConfig,
-	effects:          EffectsConfig,
-	item_pool:        ItemPoolConfig,
-	modifier_effects: ModifierEffectsConfig,
-	waves:            []WaveConfig,
+	effects:   EffectsConfig,
+	item_pool: ItemPoolConfig,
 }
 
 GameConfig :: struct {
-	using _:      BaseConfig,
-	background:   BackgroundConfig,
-	difficulties: [Difficulty]DifficultyConfig,
-	hud:          HudConfig,
-	items:        map[ItemKind]ItemConfig,
-	player:       PlayerConfig,
-	sounds:       SoundsConfig,
-	updated_at:   time.Time,
-	modifiers:    ModifiersConfig,
+	using _:          BaseConfig,
+	background:       BackgroundConfig,
+	cards:            CardsConfig,
+	difficulties:     [Difficulty]DifficultyConfig,
+	fonts:            FontsConfig,
+	hud:              HudConfig,
+	items:            map[ItemKind]ItemConfig,
+	modifier_effects: ModifierEffectsConfig,
+	modifiers:        ModifiersConfig,
+	player:           PlayerConfig,
+	sounds:           SoundsConfig,
+	waves:            []WaveConfig,
+	updated_at:       time.Time,
 }
 
 GameConfigRaw :: struct {
+	using _:          BaseConfig,
 	background:       []BackgroundPieceConfigRaw,
-	cards:            CardsConfig,
+	cards:            CardsConfigRaw,
 	difficulties:     []DifficultyConfigRaw,
-	effects:          EffectsConfig,
+	fonts:            []FontConfigRaw,
 	hud:              HudConfigRaw,
-	item_pool:        ItemPoolConfig,
 	items:            []ItemConfigRaw,
 	modifier_effects: ModifierEffectsConfigRaw,
 	modifiers:        []ModifierConfigRaw,
@@ -71,9 +74,33 @@ BackgroundPieceConfigRaw :: struct {
 }
 
 CardsConfig :: struct {
-	width:  f32,
-	height: f32,
-	gap:    f32,
+	gap:             f32,
+	sprite:          k2.Texture,
+	width:           f32,
+	height:          f32,
+	title_box:       TitleTextBoxConfig,
+	description_box: DescriptionTextBoxConfig,
+}
+
+CardsConfigRaw :: struct {
+	gap:             f32,
+	sprite:          string,
+	width:           f32,
+	height:          f32,
+	title_box:       TitleTextBoxConfig,
+	description_box: DescriptionTextBoxConfig,
+}
+
+TitleTextBoxConfig :: struct {
+	x_margin: f32,
+	top_y:    f32,
+	height:   f32,
+}
+
+DescriptionTextBoxConfig :: struct {
+	x_margin: f32,
+	bottom_y: f32,
+	height:   f32,
 }
 
 DifficultyConfig :: struct {
@@ -121,6 +148,27 @@ EffectsConfig :: struct {
 	particle_size:                    f32,
 	particle_size_min_multiplier:     f32,
 	particle_speed:                   f32,
+}
+
+FontKind :: enum {
+	H1,
+	P,
+}
+
+FontsConfig :: struct {
+	by_kind: map[FontKind]FontConfig,
+}
+
+FontConfig :: struct {
+	kind: FontKind,
+	font: k2.Font,
+	size: int,
+}
+
+FontConfigRaw :: struct {
+	kind: string,
+	font: string,
+	size: int,
 }
 
 HudConfig :: struct {
@@ -405,9 +453,10 @@ parse_game_config :: proc(
 
 	return GameConfig {
 		background = parse_background_config(allocator, raw.background),
-		cards = raw.cards,
+		cards = parse_cards_config(raw.cards),
 		difficulties = parse_difficulties_config(allocator, raw.difficulties),
 		effects = raw.effects,
+		fonts = parse_fonts_config(allocator, raw.fonts),
 		hud = parse_hud_config(raw.hud),
 		item_pool = item_pool,
 		modifier_effects = parse_modifier_effects_config(raw.modifier_effects),
@@ -465,6 +514,17 @@ parse_background_piece_def :: proc(
 	}
 }
 
+parse_cards_config :: proc(config: CardsConfigRaw) -> CardsConfig {
+	return CardsConfig {
+		gap = config.gap,
+		sprite = load_texture_from(config.sprite),
+		width = config.width,
+		height = config.height,
+		title_box = config.title_box,
+		description_box = config.description_box,
+	}
+}
+
 parse_difficulties_config :: proc(
 	allocator: runtime.Allocator,
 	raw: []DifficultyConfigRaw,
@@ -516,6 +576,40 @@ parse_difficulty :: proc(
 		lives          = difficulty.lives,
 	}
 	seen[kind] = true
+}
+
+parse_fonts_config :: proc(allocator: runtime.Allocator, raw: []FontConfigRaw) -> FontsConfig {
+	if len(raw) == 0 {
+		fmt.eprintln("Invalid fonts config: fonts must be non-empty")
+		panic("Invalid fonts config")
+	}
+
+	by_kind := make(map[FontKind]FontConfig, allocator)
+	for font in raw {
+		def := parse_font_def(&by_kind, font)
+		map_insert(&by_kind, def.kind, def)
+	}
+
+	if !(.H1 in by_kind) || !(.P in by_kind) {
+		fmt.eprintln("Invalid fonts config: h1 and p fonts are required")
+		panic("Invalid fonts config")
+	}
+
+	return FontsConfig{by_kind = by_kind}
+}
+
+parse_font_def :: proc(by_kind: ^map[FontKind]FontConfig, raw: FontConfigRaw) -> FontConfig {
+	kind, kind_ok := font_kind_from_string(raw.kind).?
+	if !kind_ok {
+		fmt.eprintfln("Invalid fonts config: unknown font kind '%v'", raw.kind)
+		panic("Invalid fonts config")
+	}
+	if kind in by_kind {
+		fmt.eprintfln("Invalid fonts config: duplicate font kind '%v'", raw.kind)
+		panic("Invalid fonts config")
+	}
+
+	return FontConfig{kind = kind, font = load_font_from(raw.font, raw.size), size = raw.size}
 }
 
 parse_hud_config :: proc(raw: HudConfigRaw) -> HudConfig {
@@ -726,16 +820,6 @@ parse_sound_config :: proc(allocator: runtime.Allocator, raw: []SoundConfigRaw) 
 	return SoundsConfig{by_kind = by_kind}
 }
 
-load_sound_from :: proc(sound_name: string) -> k2.Sound {
-	// TODO: This won't work from the bin (or any non root dir)
-	path := asset_path_required(
-		strings.concatenate({"sounds/", sound_name, ".wav"}, context.temp_allocator),
-		sound_name,
-	)
-	return k2.load_sound_from_file(path)
-}
-
-
 parse_waves_config :: proc(
 	allocator: runtime.Allocator,
 	raw: []WaveConfigRaw,
@@ -786,6 +870,30 @@ parse_waves_config :: proc(
 		}
 	}
 	return config
+}
+
+load_font_from :: proc(font_name: string, size: int) -> k2.Font {
+	// TODO: This won't work from the bin (or any non root dir)
+	path := asset_path_required(
+		strings.concatenate({"fonts/", font_name, ".ttf"}, context.temp_allocator),
+		font_name,
+	)
+
+	font_codepoints := utf8.string_to_runes(
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890-., :'",
+		context.temp_allocator,
+	)
+
+	return k2.load_static_font_from_file(path, f32(size), font_codepoints)
+}
+
+load_sound_from :: proc(sound_name: string) -> k2.Sound {
+	// TODO: This won't work from the bin (or any non root dir)
+	path := asset_path_required(
+		strings.concatenate({"sounds/", sound_name, ".wav"}, context.temp_allocator),
+		sound_name,
+	)
+	return k2.load_sound_from_file(path)
 }
 
 load_texture_from :: proc(sprite_name: string) -> k2.Texture {
@@ -928,6 +1036,16 @@ shape_from_string :: proc(raw: string) -> Maybe(ItemShape) {
 	return nil
 }
 
+font_kind_from_string :: proc(raw: string) -> Maybe(FontKind) {
+	switch raw {
+	case "h1":
+		return .H1
+	case "p":
+		return .P
+	}
+	return nil
+}
+
 asset_path_required :: proc(relative: string, label: string) -> string {
 	path, err := filepath.join({"assets", relative}, context.temp_allocator)
 	if err != nil {
@@ -943,6 +1061,11 @@ asset_path_required :: proc(relative: string, label: string) -> string {
 
 // TODO: This is fine for now because we recreate all
 game_config_destroy :: proc(game_config: ^GameConfig) {
+	for _, font in game_config.fonts.by_kind {
+		k2.destroy_font(font.font)
+	}
+
+	k2.destroy_texture(game_config.cards.sprite)
 	k2.destroy_texture(game_config.player.sprite)
 
 	for _, item in game_config.items {
