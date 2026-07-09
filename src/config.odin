@@ -59,37 +59,27 @@ BackgroundConfig :: struct {
 	pieces: map[BackgroundKind]BackgroundPieceConfig,
 }
 
-BackgroundPieceConfig :: struct {
-	kind:    BackgroundKind,
-	texture: k2.Texture,
-	width:   f32,
-	height:  f32,
-}
-
-BackgroundPieceConfigRaw :: struct {
-	kind:   string,
-	sprite: string,
+BackgroundPieceConfigData :: struct($Kind, $Sprite: typeid) {
+	kind:   Kind,
+	sprite: Sprite,
 	width:  f32,
 	height: f32,
 }
 
-CardsConfig :: struct {
+BackgroundPieceConfigRaw :: BackgroundPieceConfigData(string, string)
+BackgroundPieceConfig :: BackgroundPieceConfigData(BackgroundKind, k2.Texture)
+
+CardsConfigData :: struct($Sprite: typeid) {
 	gap:             f32,
-	sprite:          k2.Texture,
+	sprite:          Sprite,
 	width:           f32,
 	height:          f32,
 	title_box:       TitleTextBoxConfig,
 	description_box: DescriptionTextBoxConfig,
 }
 
-CardsConfigRaw :: struct {
-	gap:             f32,
-	sprite:          string,
-	width:           f32,
-	height:          f32,
-	title_box:       TitleTextBoxConfig,
-	description_box: DescriptionTextBoxConfig,
-}
+CardsConfigRaw :: CardsConfigData(string)
+CardsConfig :: CardsConfigData(k2.Texture)
 
 TitleTextBoxConfig :: struct {
 	x_margin: f32,
@@ -103,8 +93,8 @@ DescriptionTextBoxConfig :: struct {
 	height:   f32,
 }
 
-DifficultyConfig :: struct {
-	kind:           Difficulty,
+DifficultyConfigData :: struct($Kind: typeid) {
+	kind:           Kind,
 	label:          string,
 	spawn_interval: f32,
 	item_speed:     f32,
@@ -112,14 +102,8 @@ DifficultyConfig :: struct {
 	lives:          u8,
 }
 
-DifficultyConfigRaw :: struct {
-	kind:           string,
-	label:          string,
-	spawn_interval: f32,
-	item_speed:     f32,
-	max_active:     u8,
-	lives:          u8,
-}
+DifficultyConfigRaw :: DifficultyConfigData(string)
+DifficultyConfig :: DifficultyConfigData(Difficulty)
 
 EffectsConfig :: struct {
 	flashing_lifetime:                f32,
@@ -159,53 +143,40 @@ FontsConfig :: struct {
 	by_kind: map[FontKind]FontConfig,
 }
 
-FontConfig :: struct {
-	kind: FontKind,
-	font: k2.Font,
+FontConfigData :: struct($Kind, $Font: typeid) {
+	kind: Kind,
+	font: Font,
 	size: int,
 }
 
-FontConfigRaw :: struct {
-	kind: string,
-	font: string,
-	size: int,
-}
+FontConfigRaw :: FontConfigData(string, string)
+FontConfig :: FontConfigData(FontKind, k2.Font)
 
-HudConfig :: struct {
+HudConfigData :: struct($LivesSprite: typeid) {
 	margin:       f32,
-	lives_sprite: k2.Texture,
+	lives_sprite: LivesSprite,
 	lives_width:  f32,
 	lives_height: f32,
 	lives_gap:    f32,
 }
 
-HudConfigRaw :: struct {
-	margin:       f32,
-	lives_sprite: string,
-	lives_width:  f32,
-	lives_height: f32,
-	lives_gap:    f32,
-}
+HudConfigRaw :: HudConfigData(string)
+HudConfig :: HudConfigData(k2.Texture)
 
 ItemPoolConfig :: struct {
 	good_to_bad_ratio: f32,
 }
 
-ModifierEffectsConfig :: struct {
-	prestige_preference_item:     ItemKind,
-	tech_stack_preference_item:   ItemKind,
-	compensation_preference_item: ItemKind,
-	remote_work_preference_item:  ItemKind,
+ModifierEffectsConfigData :: struct($Item: typeid) {
+	prestige_preference_item:     Item,
+	tech_stack_preference_item:   Item,
+	compensation_preference_item: Item,
+	remote_work_preference_item:  Item,
 	using _:                      ModifierEffectsTuningConfig,
 }
 
-ModifierEffectsConfigRaw :: struct {
-	prestige_preference_item:     string,
-	tech_stack_preference_item:   string,
-	compensation_preference_item: string,
-	remote_work_preference_item:  string,
-	using _:                      ModifierEffectsTuningConfig,
-}
+ModifierEffectsConfigRaw :: ModifierEffectsConfigData(string)
+ModifierEffectsConfig :: ModifierEffectsConfigData(ItemKind)
 
 ModifierEffectsTuningConfig :: struct {
 	ask_for_referral_weight_multiplier:     f32,
@@ -227,17 +198,14 @@ ModifiersConfig :: struct {
 	by_kind: map[ModifierKind]ModifierConfig,
 }
 
-ModifierConfig :: struct {
-	kind:        ModifierKind,
+ModifierConfigData :: struct($Kind: typeid) {
+	kind:        Kind,
 	title:       string,
 	description: string,
 }
 
-ModifierConfigRaw :: struct {
-	kind:        string,
-	title:       string,
-	description: string,
-}
+ModifierConfigRaw :: ModifierConfigData(string)
+ModifierConfig :: ModifierConfigData(ModifierKind)
 
 ItemConfig :: struct {
 	kind:   ItemKind,
@@ -260,8 +228,8 @@ ItemConfigRaw :: struct {
 	points:  u32,
 }
 
-PlayerConfig :: struct {
-	sprite:         k2.Texture,
+PlayerConfigData :: struct($Sprite: typeid) {
+	sprite:         Sprite,
 	width:          f32,
 	height:         f32,
 	speed:          f32,
@@ -271,16 +239,8 @@ PlayerConfig :: struct {
 	squash_time:    f32,
 }
 
-PlayerConfigRaw :: struct {
-	sprite:         string,
-	width:          f32,
-	height:         f32,
-	speed:          f32,
-	floor_offset:   f32,
-	squash_scale_x: f32,
-	squash_scale_y: f32,
-	squash_time:    f32,
-}
+PlayerConfigRaw :: PlayerConfigData(string)
+PlayerConfig :: PlayerConfigData(k2.Texture)
 
 SoundKind :: enum {
 	CatchGood,
@@ -298,19 +258,15 @@ SoundConfigRaw :: struct {
 	sound: string,
 }
 
-WaveConfig :: struct {
+WaveConfigData :: struct($Modifier: typeid) {
 	spawn_multiplier: f32,
 	speed_multiplier: f32,
 	duration:         f32,
-	modifiers:        []ModifierKind,
+	modifiers:        []Modifier,
 }
 
-WaveConfigRaw :: struct {
-	spawn_multiplier: f32,
-	speed_multiplier: f32,
-	duration:         f32,
-	modifiers:        []string,
-}
+WaveConfigRaw :: WaveConfigData(string)
+WaveConfig :: WaveConfigData(ModifierKind)
 
 game_config_load :: proc(allocator: runtime.Allocator) -> GameConfig {
 	config_path := asset_path_required("config/game.json", "game config")
@@ -508,7 +464,7 @@ parse_background_piece_def :: proc(
 
 	return BackgroundPieceConfig {
 		kind = kind,
-		texture = load_texture_from(raw.sprite),
+		sprite = load_texture_from(raw.sprite),
 		width = raw.width,
 		height = raw.height,
 	}
@@ -1073,7 +1029,7 @@ game_config_destroy :: proc(game_config: ^GameConfig) {
 	}
 
 	for _, piece in game_config.background.pieces {
-		k2.destroy_texture(piece.texture)
+		k2.destroy_texture(piece.sprite)
 	}
 
 	k2.destroy_texture(game_config.hud.lives_sprite)

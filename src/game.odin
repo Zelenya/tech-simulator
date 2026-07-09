@@ -78,7 +78,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 				if item_is_good(def) {
 					effects_set_hit(config.effects, &session.effects, v2 = true)
 					// TODO: Consider different sound
-						k2.play_sound(config.sounds.by_kind[.CatchBad])
+					k2.play_sound(config.sounds.by_kind[.CatchBad])
 					session.lives -= 1
 					session.combo = 0
 				}
@@ -90,7 +90,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 			switch effect in def.effect {
 			case GoodItemCaught:
 				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
-						k2.play_sound(config.sounds.by_kind[.CatchGood])
+					k2.play_sound(config.sounds.by_kind[.CatchGood])
 					multiplier := get_multiplier(session.effects, session.combo, item.kind)
 					// TODO: We should pass something closer to collision's x,y
 					floating_text_spawn(
@@ -108,7 +108,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 				}
 			case BadItemCaught:
 				if (has_collision(session.player, item)) {
-						k2.play_sound(config.sounds.by_kind[.CatchBad])
+					k2.play_sound(config.sounds.by_kind[.CatchBad])
 					item_remove(&session.item_pool, &item)
 					// TODO: Improve position passing (maybe trigger particles somewhere else)
 					particles_spawn(
@@ -209,7 +209,7 @@ game_background_draw :: proc(config: BackgroundConfig) {
 			w = floor.width,
 			h = floor.height,
 		}
-		k2.draw_texture_fit(floor.texture, k2.get_texture_rect(floor.texture), rect)
+		k2.draw_texture_fit(floor.sprite, k2.get_texture_rect(floor.sprite), rect)
 	}
 
 	wall_cols := int(screen.x / wall.width) + 1
@@ -223,7 +223,7 @@ game_background_draw :: proc(config: BackgroundConfig) {
 				w = wall.width,
 				h = wall.height,
 			}
-			k2.draw_texture_fit(wall.texture, k2.get_texture_rect(wall.texture), rect)
+			k2.draw_texture_fit(wall.sprite, k2.get_texture_rect(wall.sprite), rect)
 		}
 	}
 
@@ -236,7 +236,7 @@ game_background_draw :: proc(config: BackgroundConfig) {
 			h = window.height,
 		}
 
-		k2.draw_texture_fit(window.texture, k2.get_texture_rect(window.texture), window_rect)
+		k2.draw_texture_fit(window.sprite, k2.get_texture_rect(window.sprite), window_rect)
 	}
 
 }
