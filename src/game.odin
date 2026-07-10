@@ -5,9 +5,8 @@ import "base:runtime"
 import "core:fmt"
 
 GameState :: enum {
-	Title,
+	WaveMenu,
 	Playing,
-	ModifierPick,
 	Pause,
 	GameOver,
 }
@@ -59,7 +58,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	// Make progress (clamp it to X waves to be reasonable... for now)
 	if session.wave_timer > config.waves[session.current_wave].duration &&
 	   session.current_wave < len(config.waves) - 1 {
-		return .ModifierPick
+		return .WaveMenu
 	}
 
 	item_pool_spawn(config, session.item_catalog, &session.item_pool, screen.x, dt)
@@ -149,12 +148,6 @@ has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 	item_box := k2.rect_from_pos_size({item.x, item.y}, {item.width, item.height})
 	return k2.rect_overlapping(player_box, k2.rect_expand(item_box, margin, margin))
 }
-
-// TODO: Move all of those to config
-// MARGIN: f32 : 20
-// HEART_WIDTH: f32 : 36
-// HEART_HEIGHT: f32 : 28
-// HEART_GAP: f32 : 10
 
 game_draw :: proc(config: GameConfig, session: Session) {
 	screen := game_screen_size()

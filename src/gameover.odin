@@ -5,7 +5,7 @@ import "core:fmt"
 
 gameover_update :: proc() -> GameState {
 	if k2.key_went_down(.Enter) || k2.key_went_down(.Space) || k2.key_went_down(.R) {
-		return GameState.Title
+		return GameState.WaveMenu
 	} else {
 		return GameState.GameOver
 	}
