@@ -123,30 +123,22 @@ item_catalog_update_good_to_bad_ratio :: proc(item_catalog: ^ItemCatalog, multip
 	item_catalog_refill(item_catalog)
 }
 
-ItemState :: enum {
-	Inactive,
-	Falling,
-	Flashing,
-}
-
 Item :: struct {
-	x, y:             f32,
-	width, height:    f32,
-	speed:            f32,
-	kind:             ItemKind,
-	state:            ItemState,
-	// for the Flashing state
-	flashing_elapsed: f32,
-	spawn_elapsed:    f32,
+	x, y:          f32,
+	width, height: f32,
+	speed:         f32,
+	kind:          ItemKind,
+	spawn_elapsed: f32,
 }
 
 item_init :: proc(
 	item_configs: map[ItemKind]ItemConfig,
 	item_catalog: ItemCatalog,
+	item_kind: Maybe(ItemKind),
 	screen_x: f32,
 	speed: f32,
 ) -> Item {
-	kind := pick_weighted_item_kind(item_catalog)
+	kind := item_kind.? or_else pick_weighted_item_kind(item_catalog)
 	config := item_configs[kind]
 
 	return Item {
@@ -156,8 +148,6 @@ item_init :: proc(
 		height = config.height,
 		speed = speed,
 		kind = kind,
-		state = .Falling,
-		flashing_elapsed = 0,
 		spawn_elapsed = 0,
 	}
 }
@@ -193,25 +183,12 @@ item_update :: proc(
 	def: ItemDef,
 	dt: f32,
 ) {
-	switch item.state {
-	case .Inactive:
-	// noop
-	case .Falling:
-		item.y += item.speed * dt
-		item.spawn_elapsed += dt
+	item.y += item.speed * dt
+	item.spawn_elapsed += dt
 
-		if item_is_good(def) && session.effects.good_catch_magnet > 1 {
-			dir := session.player.x - item.x
-			item.x += dir * session.effects.good_catch_magnet * dt
-		}
-	case .Flashing:
-		item.flashing_elapsed += dt
-		if item.flashing_elapsed > effect_config.flashing_lifetime {
-			item.state = .Inactive
-
-			pos: k2.Vec2 = {item.x + item.width / 2, item.y + item.height / 2}
-			particles_spawn(effect_config, &session.effects.particle_pool, pos)
-		}
+	if item_is_good(def) && session.effects.good_catch_magnet > 1 {
+		dir := session.player.x - item.x
+		item.x += dir * session.effects.good_catch_magnet * dt
 	}
 }
 
@@ -228,8 +205,9 @@ item_is_good :: proc(def: ItemDef) -> bool {
 item_draw :: proc(
 	effects_config: EffectsConfig,
 	item_config: ItemConfig,
-	effects: Effects,
+	rules: GameRules,
 	item: Item,
+	flashing: bool,
 ) {
 	// Stretch on spawn (TODO: this might need to go into update not to mess with magnets and stuff)
 	scale := min(item.spawn_elapsed / 0.2, 1.0)
@@ -242,24 +220,17 @@ item_draw :: proc(
 		h = scale_h,
 	}
 
-	switch item.state {
-	case .Inactive:
-		break
-	case .Falling:
+	if flashing {
+		item_draw_flashing(item_config.shape, item_box, k2.WHITE)
+
+	} else {
 		k2.draw_texture_fit(item_config.sprite, k2.get_texture_rect(item_config.sprite), item_box)
-		item_draw_outline(item_config.shape, item_box, 3, get_item_color(effects, item_config))
-	case .Flashing:
-		flashing := int(item.flashing_elapsed * effects_config.flashing_speed) % 2 == 0
-		if flashing {
-			item_draw_flashing(item_config.shape, item_box, k2.WHITE)
-		} else {
-			k2.draw_texture_fit(
-				item_config.sprite,
-				k2.get_texture_rect(item_config.sprite),
-				item_box,
-			)
-			item_draw_outline(item_config.shape, item_box, 3, get_item_color(effects, item_config))
-		}
+		item_draw_outline(
+			item_config.shape,
+			item_box,
+			3,
+			get_item_color(rules.preference, item_config),
+		)
 	}
 }
 
@@ -283,10 +254,10 @@ item_draw_flashing :: proc(shape: ItemShape, box: k2.Rect, color: k2.Color) {
 }
 
 // Note: If we decide to make effects dynamic and mess with items, this shouldn't use config
-get_item_color :: proc(effects: Effects, item: ItemConfig) -> k2.Color {
+get_item_color :: proc(preference: Maybe(ItemKind), item: ItemConfig) -> k2.Color {
 	switch effect in item.effect {
 	case GoodItemCaught:
-		if effects.preference == item.kind {
+		if preference == item.kind {
 			return k2.PURPLE
 		} else {
 			return k2.GREEN
@@ -302,9 +273,9 @@ ItemPool :: struct {
 	// TODO: Move the settings?
 	setting_spawn_timer: f32,
 	setting_item_speed:  f32,
-	setting_active_cap:  u8,
+	setting_normal_cap:  u8,
+	setting_hard_cap:    u8,
 	items:               [dynamic]Item,
-	currently_active:    u8,
 	spawn_cooldown:      f32,
 }
 
@@ -313,19 +284,23 @@ ItemPool :: struct {
 item_pool_init :: proc(
 	allocator: runtime.Allocator,
 	active_cap: u8,
+	hard_cap: u8,
 	speed: f32,
 	spawn_cooldown: f32,
 ) -> ItemPool {
-	// TODO: Review. We only see capped active items + flashing items
-	capacity := int(2 * active_cap)
 	return ItemPool {
 		setting_spawn_timer = spawn_cooldown,
 		setting_item_speed = speed,
-		setting_active_cap = active_cap,
-		items = make([dynamic]Item, capacity, capacity, allocator),
-		currently_active = 0,
+		setting_normal_cap = active_cap,
+		setting_hard_cap = hard_cap,
+		items = make([dynamic]Item, 0, hard_cap, allocator),
 		spawn_cooldown = spawn_cooldown,
 	}
+}
+
+ItemSpawnPolicy :: enum {
+	Normal,
+	BypassCap,
 }
 
 // Uses primitive cooldown based on dt
@@ -339,34 +314,70 @@ item_pool_spawn :: proc(
 	item_pool.spawn_cooldown -= dt
 	if item_pool.spawn_cooldown <= 0 {
 		item_pool.spawn_cooldown = item_pool.setting_spawn_timer
-		if item_pool.currently_active < item_pool.setting_active_cap {
-			found := false
-			// re-use a spot (TODO: better re-use)
-			for &item in item_pool.items {
-				if item.state == .Inactive {
-					item = item_init(
-						config.items,
-						item_catalog,
-						screen_x,
-						item_pool.setting_item_speed,
-					)
-					found = true
-					break
-				}
-			}
-			// or create a new one (TODO: this is ok for now, but can be pre-allocated)
-			if !found {
-				item := item_init(
-					config.items,
-					item_catalog,
+		_ = item_pool_spawn_one(
+			config,
+			item_catalog,
+			item_pool,
+			nil,
+			ItemSpawnPolicy.Normal,
+			screen_x,
+		)
+	}
+}
+
+// TODO: Merge with above when we have better event/modifiers handling
+item_pool_spawn_modified :: proc(config: GameConfig, session: ^Session, screen_x: f32) {
+	for &modifier in session.modifiers.runtime {
+		switch &state in modifier {
+		case PetProjectModifier:
+			to_spawn := state.pending_items
+			for _ in 0 ..< to_spawn {
+				spawned := item_pool_spawn_one(
+					config,
+					session.item_catalog,
+					&session.item_pool,
+					session.rules.preference,
+					ItemSpawnPolicy.BypassCap,
 					screen_x,
-					item_pool.setting_item_speed,
 				)
-				append(&item_pool.items, item)
+
+				if !spawned do break
+				state.pending_items -= 1
 			}
-			item_pool.currently_active += 1
 		}
 	}
+}
+
+@(private = "file")
+item_pool_spawn_one :: proc(
+	config: GameConfig,
+	item_catalog: ItemCatalog,
+	item_pool: ^ItemPool,
+	item_kind: Maybe(ItemKind),
+	policy: ItemSpawnPolicy,
+	screen_x: f32,
+) -> bool {
+	active := len(item_pool.items)
+
+	// Everyone respects the hard cap
+	if active >= int(item_pool.setting_hard_cap) {
+		return false
+	}
+
+	// Normal spawns respect the normal cap, special/modifiers don't
+	if policy == .Normal && active >= int(item_pool.setting_normal_cap) {
+		return false
+	}
+
+	item := item_init(
+		config.items,
+		item_catalog,
+		item_kind,
+		screen_x,
+		item_pool.setting_item_speed,
+	)
+	append(&item_pool.items, item)
+	return true
 }
 
 item_pool_next_wave :: proc(item_pool: ^ItemPool, spawn_multiplier: f32, speed_multiplier: f32) {
@@ -374,15 +385,14 @@ item_pool_next_wave :: proc(item_pool: ^ItemPool, spawn_multiplier: f32, speed_m
 	item_pool.setting_item_speed *= speed_multiplier
 }
 
-item_pool_reset_active :: proc(item_pool: ^ItemPool) {
+item_pool_reset_active :: proc(config: ItemPoolConfig, item_pool: ^ItemPool) {
 	clear(&item_pool.items)
-	item_pool.currently_active = 0
 	item_pool.spawn_cooldown = item_pool.setting_spawn_timer
+	item_pool.setting_hard_cap = config.hard_cap
 }
 
-item_remove :: proc(pool: ^ItemPool, item: ^Item) {
-	if item.state == .Falling {
-		item.state = .Flashing
-		pool.currently_active -= 1
-	}
+item_pool_remove_at :: proc(pool: ^ItemPool, index: int) -> Item {
+	removed := pool.items[index]
+	unordered_remove(&pool.items, index)
+	return removed
 }

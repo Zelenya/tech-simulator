@@ -109,13 +109,15 @@
     "lives_height": 28
   },
   "item_pool": {
-    "good_to_bad_ratio": 0.6
+    "good_to_bad_ratio": 0.6,
+    "hard_cap": 64
   },
   "modifier_effects": {
     "prestige_preference_item": "faang",
     "tech_stack_preference_item": "fire-stack",
     "compensation_preference_item": "big-money",
     "remote_work_preference_item": "remote",
+    "add_pet_project_catch_number": 3,
     "ask_for_referral_weight_multiplier": 3,
     "file_unemployment_lives_delta": 1,
     "give_conference_talk_margin_multiplier": 0.2,
@@ -154,7 +156,7 @@
     {
       "kind": "add-pet-project",
       "title": "Add Pet Project",
-      "description": "Add a bonus item every few catches."
+      "description": "Spawn a bonus item every few catches."
     },
     {
       "kind": "ask-for-referral",
@@ -361,7 +363,7 @@
     {
       "spawn_multiplier": 1.0,
       "speed_multiplier": 1.0,
-      "duration": 2,
+      "duration": 10,
       "modifiers": ["prestige", "tech-stack", "compensation", "remote-work"]
     },
     {

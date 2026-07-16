@@ -165,6 +165,7 @@ HudConfig :: HudConfigData(k2.Texture)
 
 ItemPoolConfig :: struct {
 	good_to_bad_ratio: f32,
+	hard_cap:          u8,
 }
 
 ModifierEffectsConfigData :: struct($Item: typeid) {
@@ -179,6 +180,7 @@ ModifierEffectsConfigRaw :: ModifierEffectsConfigData(string)
 ModifierEffectsConfig :: ModifierEffectsConfigData(ItemKind)
 
 ModifierEffectsTuningConfig :: struct {
+	add_pet_project_catch_number:           u32,
 	ask_for_referral_weight_multiplier:     f32,
 	file_unemployment_lives_delta:          i8,
 	give_conference_talk_margin_multiplier: f32,
@@ -607,6 +609,7 @@ parse_modifier_effects_config :: proc(raw: ModifierEffectsConfigRaw) -> Modifier
 			raw.remote_work_preference_item,
 			"remote_work_preference_item",
 		),
+		add_pet_project_catch_number = raw.add_pet_project_catch_number,
 		ask_for_referral_weight_multiplier = raw.ask_for_referral_weight_multiplier,
 		file_unemployment_lives_delta = raw.file_unemployment_lives_delta,
 		give_conference_talk_margin_multiplier = raw.give_conference_talk_margin_multiplier,
@@ -973,7 +976,7 @@ modifier_kind_from_string :: proc(raw: string) -> Maybe(ModifierKind) {
 	case "recruiter-spam":
 		return .RecruiterSpam
 	case "imposter-syndrome":
-		return .ImposterSyndrom
+		return .ImposterSyndrome
 	case "bonus":
 		return .Bonus
 	case "continue":

@@ -11,16 +11,22 @@ Effects :: struct {
 	dust_timer:        f32,
 	flash_color:       Maybe(k2.Color),
 	flash_timer:       f32,
+	item_flashes:      [dynamic]ItemFlash,
 	floating_texts:    [16]FloatingText,
 	particle_pool:     []Particle,
 	score_base:        u32,
-	preference:        Maybe(ItemKind),
 	good_catch_magnet: f32,
 	// TODO: Make it part of the difficulty too?
 	good_catch_margin: f32,
 }
 
+ItemFlash :: struct {
+	item:    Item,
+	elapsed: f32,
+}
+
 // TODO: Also needs better pools
+// TODO: Pass config for items and use it for flashes
 effects_init :: proc(allocator: runtime.Allocator, config: EffectsConfig) -> Effects {
 	empty: [16]FloatingText
 	// TODO: Pass active from difficulty config + dust (lifetime vs timer)
@@ -34,8 +40,8 @@ effects_init :: proc(allocator: runtime.Allocator, config: EffectsConfig) -> Eff
 		flash_timer = 0,
 		score_base = 1,
 		floating_texts = empty,
+		item_flashes = make([dynamic]ItemFlash, 0, 16, allocator),
 		particle_pool = make([]Particle, max_particles, allocator),
-		preference = nil,
 		good_catch_magnet = 1,
 		good_catch_margin = 1,
 	}
@@ -51,6 +57,7 @@ effects_set_hit :: proc(config: EffectsConfig, effects: ^Effects, v2: bool) {
 effects_update :: proc(config: EffectsConfig, player: Player, effects: ^Effects, dt: f32) {
 	floating_text_pool_update(config, &effects.floating_texts, dt)
 	flash_update(effects, dt)
+	item_flash_update(config, effects, dt)
 	particle_dust_update(config, player, effects, dt)
 	particle_pool_update(&effects.particle_pool, dt)
 	shake_update(config, effects, dt)
@@ -62,10 +69,14 @@ effects_reset :: proc(effects: Effects) {
 	}
 }
 
-effects_draw :: proc(config: EffectsConfig, effects: Effects) {
+effects_draw :: proc(config: GameConfig, rules: GameRules, effects: Effects) {
 	flash_draw(effects)
 	for text in effects.floating_texts {
-		if text.active do floating_text_draw(config, text)
+		if text.active do floating_text_draw(config.effects, text)
+	}
+
+	for item_flash in effects.item_flashes {
+		item_flash_draw(config.effects, config.items[item_flash.item.kind], rules, item_flash)
 	}
 
 	for particle in effects.particle_pool {
@@ -73,9 +84,15 @@ effects_draw :: proc(config: EffectsConfig, effects: Effects) {
 	}
 }
 
-get_multiplier :: proc(effects: Effects, combo: u32, item_kind: ItemKind) -> u32 {
+// TODO: Move
+get_multiplier :: proc(
+	effects: Effects,
+	preference: Maybe(ItemKind),
+	combo: u32,
+	item_kind: ItemKind,
+) -> u32 {
 	// TODO: Move this to config and/or play with formulas
-	item_multiplier: u32 = 2 if effects.preference == item_kind else 1
+	item_multiplier: u32 = 2 if preference == item_kind else 1
 	return effects.score_base * item_multiplier * get_combo_multiplier(combo)
 }
 
@@ -159,6 +176,39 @@ flash_draw :: proc(effects: Effects) {
 		screen := game_screen_size()
 		k2.draw_rect_vec({0, 0}, screen, flash_color)
 	}
+}
+
+item_flash_spawn :: proc(effects: ^Effects, item: Item) {
+	append(&effects.item_flashes, ItemFlash{item = item, elapsed = 0})
+}
+
+item_flash_update :: proc(config: EffectsConfig, effects: ^Effects, dt: f32) {
+	i := 0
+	for i < len(effects.item_flashes) {
+		flashing_item := &effects.item_flashes[i]
+		flashing_item.elapsed += dt
+		if flashing_item.elapsed > config.flashing_lifetime {
+			pos: k2.Vec2 = {
+				flashing_item.item.x + flashing_item.item.width / 2,
+				flashing_item.item.y + flashing_item.item.height / 2,
+			}
+			particles_spawn(config, &effects.particle_pool, pos)
+			unordered_remove(&effects.item_flashes, i)
+			continue
+		}
+		i += 1
+	}
+}
+
+item_flash_draw :: proc(
+	effects_config: EffectsConfig,
+	item_config: ItemConfig,
+	rules: GameRules,
+	flashing_item: ItemFlash,
+) {
+	flashing := int(flashing_item.elapsed * effects_config.flashing_speed) % 2 == 0
+	// TOOD: This is a bit weird
+	item_draw(effects_config, item_config, rules, flashing_item.item, flashing)
 }
 
 shake_update :: proc(config: EffectsConfig, effects: ^Effects, dt: f32) {

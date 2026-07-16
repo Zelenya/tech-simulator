@@ -1,13 +1,55 @@
 package game
 
 import k2 "../karl2d"
+import "base:runtime"
 import "core:math/rand"
-// import "core:strings"
 
 Difficulty :: enum {
 	Easy,
 	Medium,
 	Hard,
+}
+
+GameRules :: struct {
+	show_score: bool,
+	preference: Maybe(ItemKind),
+}
+
+game_rules_init :: proc() -> GameRules {
+	return GameRules{show_score = true, preference = nil}
+}
+
+PetProjectModifier :: struct {
+	every_catches: u32,
+	pending_items: u32,
+	catches:       u32,
+}
+
+ModifierRuntime :: union {
+	PetProjectModifier,
+}
+
+ModifierSystem :: struct {
+	runtime: [dynamic]ModifierRuntime,
+}
+
+modifier_system_init :: proc(allocator: runtime.Allocator) -> ModifierSystem {
+	// TODO: check the limits, we shouldn't have that many ~4 capacity is ok to start with
+	return ModifierSystem{runtime = make([dynamic]ModifierRuntime, 0, 4, allocator)}
+}
+
+modifiers_on_good_item_caught :: proc(modifiers: ^ModifierSystem) {
+	for &modifier in modifiers.runtime {
+		switch &state in modifier {
+		case PetProjectModifier:
+			state.catches += 1
+
+			if state.catches >= state.every_catches {
+				state.catches = 0
+				state.pending_items += 1
+			}
+		}
+	}
 }
 
 // TODO: Split enum?
@@ -34,7 +76,7 @@ ModifierKind :: enum {
 	BlindApplication,
 	GiveUp,
 	RecruiterSpam,
-	ImposterSyndrom,
+	ImposterSyndrome,
 	// Final:
 	Bonus,
 	Continue,
@@ -45,18 +87,26 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 
 	switch modifier {
 	case .Prestige:
-		session.effects.preference = effects.prestige_preference_item
+		session.rules.preference = effects.prestige_preference_item
 	case .TechStack:
-		session.effects.preference = effects.tech_stack_preference_item
+		session.rules.preference = effects.tech_stack_preference_item
 	case .Compensation:
-		session.effects.preference = effects.compensation_preference_item
+		session.rules.preference = effects.compensation_preference_item
 	case .RemoteWork:
-		session.effects.preference = effects.remote_work_preference_item
+		session.rules.preference = effects.remote_work_preference_item
 
-	case .AddPetProject: // TODO
+	case .AddPetProject:
+		append(
+			&session.modifiers.runtime,
+			PetProjectModifier {
+				every_catches = config.modifier_effects.add_pet_project_catch_number,
+				pending_items = 0,
+				catches = 0,
+			},
+		)
 	case .AskForReferral:
 		// We update preferences on the prev. wave, player should always have one
-		item_to_boost, ok := session.effects.preference.?
+		item_to_boost, ok := session.rules.preference.?
 		if ok {
 			item_catalog_update_weight(
 				&session.item_catalog,
@@ -102,8 +152,8 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 	case .BlindApplication: // TODO
 	case .GiveUp: // TODO
 	case .RecruiterSpam: // TODO
-	case .ImposterSyndrom: // TODO
-
+	case .ImposterSyndrome:
+		session.rules.show_score = false
 	case .Bonus: // TODO
 	case .Continue: // TODO
 	}

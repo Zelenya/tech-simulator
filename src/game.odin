@@ -15,6 +15,8 @@ Session :: struct {
 	player:       Player,
 	item_catalog: ItemCatalog,
 	item_pool:    ItemPool,
+	rules:        GameRules,
+	modifiers:    ModifierSystem,
 	effects:      Effects,
 	combo:        u32,
 	score:        u32,
@@ -32,23 +34,28 @@ game_init :: proc(
 	settings := config.difficulties[difficulty]
 
 	return Session {
-		player = player_init(config.player),
+		player       = player_init(config.player),
 		item_catalog = item_catalog_init(allocator, config.items, config.item_pool),
-		item_pool = item_pool_init(
+		item_pool    = item_pool_init(
 			allocator,
 			settings.max_active,
+			config.item_pool.hard_cap,
 			settings.item_speed,
 			settings.spawn_interval,
 		),
-		effects = effects_init(allocator, config.effects),
-		combo = 0,
-		score = 0,
-		lives = cast(i8)settings.lives,
+		// TODO: pass and refactor more basic things from config
+		rules        = game_rules_init(),
+		modifiers    = modifier_system_init(allocator),
+		effects      = effects_init(allocator, config.effects),
+		combo        = 0,
+		score        = 0,
+		lives        = cast(i8)settings.lives,
 		current_wave = 0,
-		wave_timer = 0,
+		wave_timer   = 0,
 	}
 }
 
+// TODO: Introduce events for catch items, etc. to make this manageable
 game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState {
 	screen := game_screen_size()
 
@@ -63,67 +70,80 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 
 	item_pool_spawn(config, session.item_catalog, &session.item_pool, screen.x, dt)
 
+	i := 0
 	// TODO: it's ok, but could be cleaned up
 	caught := false
-	for &item in session.item_pool.items {
+	for i < len(session.item_pool.items) {
+		item := &session.item_pool.items[i]
 		def := session.item_catalog.by_kind[item.kind]
 
-		item_update(config.effects, session, &item, def, dt)
+		item_update(config.effects, session, item, def, dt)
 
-		if item.state == .Falling {
-			// Item leaves
-			if item.y + item.height / 2 > screen.y {
-				item_remove(&session.item_pool, &item)
-				if item_is_good(def) {
-					effects_set_hit(config.effects, &session.effects, v2 = true)
-					// TODO: Consider different sound
-					k2.play_sound(config.sounds.by_kind[.CatchBad])
-					session.lives -= 1
-					session.combo = 0
-				}
-				// TODO: We should give user a chance to pick up almost remove item?
+		// Item leaves
+		if item.y + item.height / 2 > screen.y {
+			removed := item_pool_remove_at(&session.item_pool, i)
+			item_flash_spawn(&session.effects, removed)
+			if item_is_good(def) {
+				effects_set_hit(config.effects, &session.effects, v2 = true)
+				// TODO: Consider different sound
+				k2.play_sound(config.sounds.by_kind[.CatchBad])
+				session.lives -= 1
+				session.combo = 0
+			}
+			// TODO: We should give user a chance to pick up almost remove item?
+			continue
+		}
+
+		// Item caught
+		switch effect in def.effect {
+		case GoodItemCaught:
+			if (has_collision(session.player, item^, session.effects.good_catch_margin)) {
+				k2.play_sound(config.sounds.by_kind[.CatchGood])
+				multiplier := get_multiplier(
+					session.effects,
+					session.rules.preference,
+					session.combo,
+					item.kind,
+				)
+				// TODO: We should pass something closer to collision's x,y
+				floating_text_spawn(
+					&session.effects.floating_texts,
+					{session.player.x + session.player.width / 2, session.player.y - 10},
+					effect.points,
+					multiplier,
+				)
+
+				removed := item_pool_remove_at(&session.item_pool, i)
+				item_flash_spawn(&session.effects, removed)
+				session.score += effect.points * multiplier
+				session.combo += 1
+				caught = true
+				modifiers_on_good_item_caught(&session.modifiers)
 				continue
 			}
-
-			// Item caught
-			switch effect in def.effect {
-			case GoodItemCaught:
-				if (has_collision(session.player, item, session.effects.good_catch_margin)) {
-					k2.play_sound(config.sounds.by_kind[.CatchGood])
-					multiplier := get_multiplier(session.effects, session.combo, item.kind)
-					// TODO: We should pass something closer to collision's x,y
-					floating_text_spawn(
-						&session.effects.floating_texts,
-						{session.player.x + session.player.width / 2, session.player.y - 10},
-						effect.points,
-						multiplier,
-					)
-
-					item_remove(&session.item_pool, &item)
-					session.score += effect.points * multiplier
-					session.combo += 1
-					caught = true
-					continue
-				}
-			case BadItemCaught:
-				if (has_collision(session.player, item)) {
-					k2.play_sound(config.sounds.by_kind[.CatchBad])
-					item_remove(&session.item_pool, &item)
-					// TODO: Improve position passing (maybe trigger particles somewhere else)
-					particles_spawn(
-						config.effects,
-						&session.effects.particle_pool,
-						{item.x, item.y},
-					)
-					effects_set_hit(config.effects, &session.effects, v2 = false)
-					session.lives -= 1
-					session.combo = 0
-					caught = true
-					continue
-				}
+		case BadItemCaught:
+			if (has_collision(session.player, item^)) {
+				k2.play_sound(config.sounds.by_kind[.CatchBad])
+				removed := item_pool_remove_at(&session.item_pool, i)
+				item_flash_spawn(&session.effects, removed)
+				// TODO: Improve position passing (maybe trigger particles somewhere else)
+				particles_spawn(
+					config.effects,
+					&session.effects.particle_pool,
+					{removed.x, removed.y},
+				)
+				effects_set_hit(config.effects, &session.effects, v2 = false)
+				session.lives -= 1
+				session.combo = 0
+				caught = true
+				continue
 			}
 		}
+
+		i += 1
 	}
+
+	item_pool_spawn_modified(config, session, screen.x)
 	// TODO: This could return new location that we can pass down for effects
 	player_update(config.player, &session.player, caught, dt)
 	effects_update(config.effects, session.player, &session.effects, dt)
@@ -136,7 +156,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 
 game_reload :: proc(config: GameConfig, session: ^Session) {
 	item_catalog_reset_from_config(config.items, config.item_pool, &session.item_catalog)
-	item_pool_reset_active(&session.item_pool)
+	item_pool_reset_active(config.item_pool, &session.item_pool)
 	session.player = player_init(config.player)
 	// in case we remove a wave:
 	session.current_wave = min(session.current_wave, len(config.waves) - 1)
@@ -156,8 +176,8 @@ game_draw :: proc(config: GameConfig, session: Session) {
 	game_background_draw(config.background)
 	player_draw(session.player, config.player)
 	for &item in session.item_pool.items {
-		item_draw(config.effects, config.items[item.kind], session.effects, item)}
-	effects_draw(config.effects, session.effects)
+		item_draw(config.effects, config.items[item.kind], session.rules, item, false)}
+	effects_draw(config, session.rules, session.effects)
 
 	// lives
 	// TODO: Move to the right and draw in other direction
@@ -175,13 +195,18 @@ game_draw :: proc(config: GameConfig, session: Session) {
 		)
 	}
 
+
+	// TODO: A more fun way to hide score?
+	if session.rules.show_score {
+		k2.draw_text(
+			fmt.tprintf("Score: %d", session.score),
+			{config.hud.margin, config.hud.margin},
+			20,
+			k2.BLACK,
+		)
+	}
+
 	// TODO: mock visuals (split and prittify)
-	k2.draw_text(
-		fmt.tprintf("Score: %d", session.score),
-		{config.hud.margin, config.hud.margin},
-		20,
-		k2.BLACK,
-	)
 	multiplier := get_combo_multiplier(session.combo)
 	combo :=
 		fmt.tprintf("Combo: %d x%d", session.combo, multiplier) if multiplier > 1 else fmt.tprintf("Combo: %d", session.combo)
