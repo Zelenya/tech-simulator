@@ -11,12 +11,33 @@ GameState :: enum {
 	GameOver,
 }
 
+GameRules :: struct {
+	show_score:        bool,
+	item_preference:   Maybe(ItemKind),
+	item_movement:     ItemMovement,
+	item_speed:        f32,
+	item_spawn_hidden: bool,
+	final_mode:        bool,
+}
+
+game_rules_init :: proc(item_speed: f32) -> GameRules {
+	return GameRules {
+		show_score = true,
+		item_preference = nil,
+		item_movement = .Normal,
+		item_speed = item_speed,
+		final_mode = false,
+	}
+}
+
 Session :: struct {
 	player:       Player,
 	item_catalog: ItemCatalog,
 	item_pool:    ItemPool,
 	rules:        GameRules,
 	modifiers:    ModifierSystem,
+	// TODO: Do we need this? Something better?
+	picks:        [dynamic]ModifierKind,
 	effects:      Effects,
 	combo:        u32,
 	score:        u32,
@@ -40,12 +61,13 @@ game_init :: proc(
 			allocator,
 			settings.max_active,
 			config.item_pool.hard_cap,
-			settings.item_speed,
 			settings.spawn_interval,
 		),
 		// TODO: pass and refactor more basic things from config
-		rules        = game_rules_init(),
+		rules        = game_rules_init(settings.item_speed),
 		modifiers    = modifier_system_init(allocator),
+		// TODO: Max is number of waves
+		picks        = make([dynamic]ModifierKind, 0, 5, allocator),
 		effects      = effects_init(allocator, config.effects),
 		combo        = 0,
 		score        = 0,
@@ -68,7 +90,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 		return .WaveMenu
 	}
 
-	item_pool_spawn(config, session.item_catalog, &session.item_pool, screen.x, dt)
+	item_pool_spawn(config, session.rules, session.item_catalog, &session.item_pool, screen.x, dt)
 
 	i := 0
 	// TODO: it's ok, but could be cleaned up
@@ -84,10 +106,14 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 			removed := item_pool_remove_at(&session.item_pool, i)
 			item_flash_spawn(&session.effects, removed)
 			if item_is_good(def) {
-				effects_set_hit(config.effects, &session.effects, v2 = true)
-				// TODO: Consider different sound
-				k2.play_sound(config.sounds.by_kind[.CatchBad])
-				session.lives -= 1
+				// TODO: Also should be event based
+				if !modifier_is_active(session^, .GiveUp) {
+					effects_set_hit(config.effects, &session.effects, v2 = true)
+					// TODO: Consider different sound
+					k2.play_sound(config.sounds.by_kind[.CatchBad])
+					effects_set_hit(config.effects, &session.effects, v2 = false)
+					session.lives -= 1
+				}
 				session.combo = 0
 			}
 			// TODO: We should give user a chance to pick up almost remove item?
@@ -96,12 +122,20 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 
 		// Item caught
 		switch effect in def.effect {
+		case NeutralItemCaught:
+			if (has_collision(session.player, item^, session.effects.good_catch_margin)) {
+				k2.play_sound(config.sounds.by_kind[.CatchDull])
+				removed := item_pool_remove_at(&session.item_pool, i)
+				item_flash_spawn(&session.effects, removed)
+				caught = true
+				continue
+			}
 		case GoodItemCaught:
 			if (has_collision(session.player, item^, session.effects.good_catch_margin)) {
 				k2.play_sound(config.sounds.by_kind[.CatchGood])
 				multiplier := get_multiplier(
 					session.effects,
-					session.rules.preference,
+					session.rules.item_preference,
 					session.combo,
 					item.kind,
 				)
@@ -118,7 +152,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 				session.score += effect.points * multiplier
 				session.combo += 1
 				caught = true
-				modifiers_on_good_item_caught(&session.modifiers)
+				modifiers_on_good_item_caught(config.modifier_effects, &session.modifiers)
 				continue
 			}
 		case BadItemCaught:
@@ -132,8 +166,12 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 					&session.effects.particle_pool,
 					{removed.x, removed.y},
 				)
-				effects_set_hit(config.effects, &session.effects, v2 = false)
-				session.lives -= 1
+
+				if !modifier_is_active(session^, .GiveUp) {
+					effects_set_hit(config.effects, &session.effects, v2 = false)
+					session.lives -= 1
+				}
+
 				session.combo = 0
 				caught = true
 				continue
@@ -143,6 +181,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 		i += 1
 	}
 
+	modifier_system_update(config.effects, config.modifier_effects, session, dt)
 	item_pool_spawn_modified(config, session, screen.x)
 	// TODO: This could return new location that we can pass down for effects
 	player_update(config.player, &session.player, caught, dt)
@@ -154,6 +193,15 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	} else {return .Playing}
 }
 
+modifier_is_active :: proc(session: Session, expected: ModifierKind) -> bool {
+	for &modifier in session.picks {
+		if modifier == expected do return true
+	}
+	return false
+}
+
+// TODO: Replay the modifier picks?
+// TODO: Otherwise we have rules in half-reloaded state
 game_reload :: proc(config: GameConfig, session: ^Session) {
 	item_catalog_reset_from_config(config.items, config.item_pool, &session.item_catalog)
 	item_pool_reset_active(config.item_pool, &session.item_pool)
@@ -194,7 +242,6 @@ game_draw :: proc(config: GameConfig, session: Session) {
 			rect,
 		)
 	}
-
 
 	// TODO: A more fun way to hide score?
 	if session.rules.show_score {
@@ -256,5 +303,4 @@ game_background_draw :: proc(config: BackgroundConfig) {
 
 		k2.draw_texture_fit(window.sprite, k2.get_texture_rect(window.sprite), window_rect)
 	}
-
 }

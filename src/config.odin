@@ -188,12 +188,17 @@ ModifierEffectsTuningConfig :: struct {
 	hiring_freeze_item_speed_multiplier:    f32,
 	burnout_item_speed_multiplier:          f32,
 	burnout_score_base_multiplier:          u32,
+	leet_code_ratio_multiplier:             f32,
 	lower_quality_bar_ratio_multiplier:     f32,
 	lower_quality_bar_lives_delta:          i8,
 	tighten_cv_ratio_multiplier:            f32,
 	tighten_cv_score_base_multiplier:       u32,
 	spray_and_pray_ratio_multiplier:        f32,
 	spray_and_pray_score_base_divisor:      u32,
+	blind_application_hidden_ratio:         f32,
+	give_up_timer:                          f32,
+	recruiter_spawn_timer:                  f32,
+	recruiter_spawn_rate:                   f32,
 }
 
 ModifiersConfig :: struct {
@@ -245,8 +250,9 @@ PlayerConfigRaw :: PlayerConfigData(string)
 PlayerConfig :: PlayerConfigData(k2.Texture)
 
 SoundKind :: enum {
-	CatchGood,
 	CatchBad,
+	CatchGood,
+	CatchDull,
 	GameOver,
 	WaveNext,
 }
@@ -617,12 +623,17 @@ parse_modifier_effects_config :: proc(raw: ModifierEffectsConfigRaw) -> Modifier
 		hiring_freeze_item_speed_multiplier = raw.hiring_freeze_item_speed_multiplier,
 		burnout_item_speed_multiplier = raw.burnout_item_speed_multiplier,
 		burnout_score_base_multiplier = raw.burnout_score_base_multiplier,
+		leet_code_ratio_multiplier = raw.leet_code_ratio_multiplier,
 		lower_quality_bar_ratio_multiplier = raw.lower_quality_bar_ratio_multiplier,
 		lower_quality_bar_lives_delta = raw.lower_quality_bar_lives_delta,
 		tighten_cv_ratio_multiplier = raw.tighten_cv_ratio_multiplier,
 		tighten_cv_score_base_multiplier = raw.tighten_cv_score_base_multiplier,
 		spray_and_pray_ratio_multiplier = raw.spray_and_pray_ratio_multiplier,
 		spray_and_pray_score_base_divisor = raw.spray_and_pray_score_base_divisor,
+		blind_application_hidden_ratio = raw.blind_application_hidden_ratio,
+		give_up_timer = raw.give_up_timer,
+		recruiter_spawn_rate = raw.recruiter_spawn_rate,
+		recruiter_spawn_timer = raw.recruiter_spawn_timer,
 	}
 }
 
@@ -694,8 +705,12 @@ parse_items_config :: proc(
 	for item in raw {
 		def := parse_item_def(&by_kind, item)
 		if item.is_good {
-			def.effect = GoodItemCaught {
-				points = item.points,
+			if item.points > 0 {
+				def.effect = GoodItemCaught {
+					points = item.points,
+				}
+			} else {
+				def.effect = NeutralItemCaught{}
 			}
 		} else {
 			def.effect = BadItemCaught{}
@@ -877,6 +892,8 @@ load_texture_from :: proc(sprite_name: string) -> k2.Texture {
 
 kind_from_string :: proc(raw: string) -> Maybe(ItemKind) {
 	switch raw {
+	case "neutral":
+		return .Neutral
 	case "normal":
 		return .Normal
 	case "call":
@@ -913,10 +930,12 @@ background_kind_from_string :: proc(raw: string) -> Maybe(BackgroundKind) {
 
 sound_kind_from_string :: proc(raw: string) -> Maybe(SoundKind) {
 	switch raw {
-	case "catch-good":
-		return .CatchGood
 	case "catch-bad":
 		return .CatchBad
+	case "catch-good":
+		return .CatchGood
+	case "catch-dull":
+		return .CatchDull
 	case "game-over":
 		return .GameOver
 	case "wave-next":
