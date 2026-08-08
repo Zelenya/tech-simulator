@@ -142,7 +142,6 @@ ModifierKind :: enum {
 
 modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: ModifierKind) {
 	effects := config.modifier_effects
-	append(&session.picks, modifier)
 
 	switch modifier {
 	case .Prestige:
@@ -169,16 +168,16 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 	case .FileUnemployment:
 		session.lives += effects.file_unemployment_lives_delta
 	case .GiveConferenceTalk:
-		session.effects.good_catch_margin +=
+		session.rules.good_catch_margin +=
 			config.player.width * effects.give_conference_talk_margin_multiplier
-		session.effects.good_catch_magnet *= effects.give_conference_talk_magnet_multiplier
+		session.rules.good_catch_magnet *= effects.give_conference_talk_magnet_multiplier
 	case .HiringFreeze:
 		// This conflicst with wave bumps?
 		session.rules.item_speed *= effects.hiring_freeze_item_speed_multiplier
 
 	case .Burnout:
 		session.rules.item_speed *= effects.burnout_item_speed_multiplier
-		session.effects.score_base *= effects.burnout_score_base_multiplier
+		session.rules.score_base *= effects.burnout_score_base_multiplier
 	case .LeetCodeGrind:
 		item_catalog_update_good_to_bad_ratio(
 			&session.item_catalog,
@@ -198,14 +197,13 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 			&session.item_catalog,
 			effects.tighten_cv_ratio_multiplier,
 		)
-		// TODO: This should be a game rule
-		session.effects.score_base *= effects.tighten_cv_score_base_multiplier
+		session.rules.score_base *= effects.tighten_cv_score_base_multiplier
 	case .SprayAndPray:
 		item_catalog_update_good_to_bad_ratio(
 			&session.item_catalog,
 			effects.spray_and_pray_ratio_multiplier,
 		)
-		session.effects.score_base /= effects.spray_and_pray_score_base_divisor
+		session.rules.score_base /= effects.spray_and_pray_score_base_divisor
 
 	case .AutomatePipeline:
 		session.rules.item_movement = .MixedSpeed
@@ -255,6 +253,10 @@ wave_next :: proc(
 		spawn_multiplier = wave.spawn_multiplier,
 		speed_multiplier = wave.speed_multiplier,
 	)
+
+	// TODO: Consider explicit: picks[wave-1] = modifier
+	append(&session.modifier_picks, modifier)
 	modifier_apply(config, session, modifier)
+
 	return GameState.Playing
 }

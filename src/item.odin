@@ -56,6 +56,20 @@ CatchEffect :: union {
 	NeutralItemCaught,
 }
 
+ItemOutcomeKind :: enum {
+	CaughtGood,
+	CaughtBad,
+	CaughtNeutral,
+	MissedGood,
+	MissedOther,
+}
+
+ItemOutcome :: struct {
+	kind:        ItemOutcomeKind,
+	item:        Item,
+	base_points: u32,
+}
+
 ItemCatalog :: struct {
 	by_kind:           map[ItemKind]ItemDef,
 	good:              [dynamic]WeightedItem,
@@ -134,6 +148,11 @@ item_catalog_update_good_to_bad_ratio :: proc(item_catalog: ^ItemCatalog, multip
 	item_catalog_refill(item_catalog)
 }
 
+ItemSpawnPolicy :: enum {
+	Normal,
+	BypassCap,
+}
+
 Item :: struct {
 	x, y:          f32,
 	width, height: f32,
@@ -141,6 +160,7 @@ Item :: struct {
 	// TODO: This needs state
 	movement:      ItemMovement,
 	kind:          ItemKind,
+	spawn_policy:  ItemSpawnPolicy,
 	spawn_elapsed: f32,
 	hidden:        bool,
 }
@@ -150,6 +170,7 @@ item_init :: proc(
 	item_catalog: ItemCatalog,
 	rules: GameRules,
 	item_kind: Maybe(ItemKind),
+	spawn_policy: ItemSpawnPolicy,
 	screen_x: f32,
 ) -> Item {
 	kind := item_kind.? or_else pick_weighted_item_kind(item_catalog)
@@ -164,6 +185,7 @@ item_init :: proc(
 		movement = rules.item_movement,
 		kind = kind,
 		spawn_elapsed = 0,
+		spawn_policy = spawn_policy,
 		hidden = rules.item_spawn_hidden,
 	}
 }
@@ -192,13 +214,7 @@ pick_weighted_item_kind_from :: proc(items: []WeightedItem, total_weight: f32) -
 	return items[0].kind
 }
 
-item_update :: proc(
-	effect_config: EffectsConfig,
-	session: ^Session,
-	item: ^Item,
-	def: ItemDef,
-	dt: f32,
-) {
+item_update :: proc(session: ^Session, item: ^Item, def: ItemDef, dt: f32) {
 	item.spawn_elapsed += dt
 
 	// TODO: This is way to crud, just testing
@@ -222,9 +238,9 @@ item_update :: proc(
 		}
 	}
 
-	if item_is_good(def) && session.effects.good_catch_magnet > 1 {
+	if item_is_good(def) && session.rules.good_catch_magnet > 1 {
 		dir := session.player.x - item.x
-		item.x += dir * session.effects.good_catch_magnet * dt
+		item.x += dir * session.rules.good_catch_magnet * dt
 	}
 }
 
@@ -238,6 +254,35 @@ item_is_good :: proc(def: ItemDef) -> bool {
 		return false
 	}
 	return false
+}
+
+item_outcome :: proc(
+	item: Item,
+	item_catch_effect: CatchEffect,
+	is_colliding: bool,
+	is_offscreen: bool,
+) -> Maybe(ItemOutcome) {
+	if is_colliding {
+		switch effect in item_catch_effect {
+		case GoodItemCaught:
+			return ItemOutcome{kind = .CaughtGood, item = item, base_points = effect.points}
+		case BadItemCaught:
+			return ItemOutcome{kind = .CaughtBad, item = item}
+		case NeutralItemCaught:
+			return ItemOutcome{kind = .CaughtNeutral, item = item}
+		}
+	}
+
+	if is_offscreen {
+		switch effect in item_catch_effect {
+		case GoodItemCaught:
+			return ItemOutcome{kind = .MissedGood, item = item, base_points = effect.points}
+		case BadItemCaught, NeutralItemCaught:
+			return ItemOutcome{kind = .MissedOther, item = item}
+		}
+	}
+
+	return nil
 }
 
 item_draw :: proc(
@@ -342,14 +387,9 @@ item_pool_init :: proc(
 	}
 }
 
-ItemSpawnPolicy :: enum {
-	Normal,
-	BypassCap,
-}
-
 // Uses primitive cooldown based on dt
 // TODO: Merge these two into one
-item_pool_spawn :: proc(
+item_pool_update_spawn :: proc(
 	config: GameConfig,
 	rules: GameRules,
 	item_catalog: ItemCatalog,
@@ -360,8 +400,8 @@ item_pool_spawn :: proc(
 	item_pool.spawn_cooldown -= dt
 	if item_pool.spawn_cooldown <= 0 {
 		item_pool.spawn_cooldown = item_pool.setting_spawn_timer
-		spawned := item_pool_spawn_one(
-			config,
+		item_pool_try_spawn(
+			config.items,
 			rules,
 			item_catalog,
 			item_pool,
@@ -369,7 +409,6 @@ item_pool_spawn :: proc(
 			ItemSpawnPolicy.Normal,
 			screen_x,
 		)
-		if spawned do item_pool.normal_active += 1
 	}
 }
 
@@ -380,8 +419,8 @@ item_pool_spawn_modified :: proc(config: GameConfig, session: ^Session, screen_x
 		case PetProjectModifier:
 			to_spawn := state.pending_items
 			for _ in 0 ..< to_spawn {
-				spawned := item_pool_spawn_one(
-					config,
+				spawned := item_pool_try_spawn(
+					config.items,
 					session.rules,
 					session.item_catalog,
 					&session.item_pool,
@@ -397,8 +436,8 @@ item_pool_spawn_modified :: proc(config: GameConfig, session: ^Session, screen_x
 		case RecruiterSpamModifier:
 			to_spawn := state.pending_items
 			for _ in 0 ..< to_spawn {
-				spawned := item_pool_spawn_one(
-					config,
+				spawned := item_pool_try_spawn(
+					config.items,
 					session.rules,
 					session.item_catalog,
 					&session.item_pool,
@@ -414,9 +453,8 @@ item_pool_spawn_modified :: proc(config: GameConfig, session: ^Session, screen_x
 	}
 }
 
-@(private = "file")
-item_pool_spawn_one :: proc(
-	config: GameConfig,
+item_pool_try_spawn :: proc(
+	items_config: map[ItemKind]ItemConfig,
 	rules: GameRules,
 	item_catalog: ItemCatalog,
 	item_pool: ^ItemPool,
@@ -424,10 +462,9 @@ item_pool_spawn_one :: proc(
 	policy: ItemSpawnPolicy,
 	screen_x: f32,
 ) -> bool {
-	active := len(item_pool.items)
-
+	// TODO: If we switch to pre-allocated limited array we won't need this
 	// Everyone respects the hard cap
-	if active >= int(item_pool.setting_hard_cap) {
+	if len(item_pool.items) >= int(item_pool.setting_hard_cap) {
 		return false
 	}
 
@@ -436,8 +473,13 @@ item_pool_spawn_one :: proc(
 		return false
 	}
 
-	item := item_init(config.items, item_catalog, rules, item_kind, screen_x)
+	item := item_init(items_config, item_catalog, rules, item_kind, policy, screen_x)
 	append(&item_pool.items, item)
+
+	if policy == .Normal {
+		item_pool.normal_active += 1
+	}
+
 	return true
 }
 
@@ -461,7 +503,11 @@ item_pool_reset_active :: proc(config: ItemPoolConfig, item_pool: ^ItemPool) {
 item_pool_remove_at :: proc(pool: ^ItemPool, index: int) -> Item {
 	removed := pool.items[index]
 	unordered_remove(&pool.items, index)
-	// TODO: does the job but feels hacky
-	if removed.kind != .Neutral do pool.normal_active -= 1
+
+	if removed.spawn_policy == .Normal {
+		assert(pool.normal_active > 0)
+		pool.normal_active -= 1
+	}
+
 	return removed
 }

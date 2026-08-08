@@ -31,28 +31,18 @@ player_init :: proc(config: PlayerConfig) -> Player {
 	}
 }
 
-player_update :: proc(config: PlayerConfig, player: ^Player, has_caught: bool, dt: f32) {
+player_update_movement :: proc(config: PlayerConfig, player: ^Player, dt: f32) {
 	screen := game_screen_size()
-
-	if player.squash_timer > 0 do player.squash_timer -= dt
-	if has_caught {
-		player.squash_timer = config.squash_time
-	}
 
 	old_x := player.x
 	player.moving = .Idle
 
 	mouse := game_mouse_position()
 	mouse_delta := k2.get_mouse_delta()
-	if mouse_delta.x != 0 {
-		player.x = mouse.x - config.width / 2
-	}
-	if k2.key_is_held(.Left) {
-		player.x -= config.speed * dt
-	}
-	if k2.key_is_held(.Right) {
-		player.x += config.speed * dt
-	}
+	if mouse_delta.x != 0 do player.x = mouse.x - config.width / 2
+	if k2.key_is_held(.Left) do player.x -= config.speed * dt
+	if k2.key_is_held(.Right) do player.x += config.speed * dt
+
 	player.x = clamp(player.x, 0, screen.x - config.width)
 
 	delta_x := player.x - old_x
@@ -63,6 +53,11 @@ player_update :: proc(config: PlayerConfig, player: ^Player, has_caught: bool, d
 		player.moving = .Right
 		player.facing = .Right
 	}
+}
+
+player_update_reaction :: proc(config: PlayerConfig, player: ^Player, has_caught: bool, dt: f32) {
+	if player.squash_timer > 0 do player.squash_timer -= dt
+	if has_caught do player.squash_timer = config.squash_time
 }
 
 player_draw :: proc(player: Player, config: PlayerConfig) {

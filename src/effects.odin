@@ -6,18 +6,14 @@ import "core:fmt"
 import "core:math/rand"
 
 Effects :: struct {
-	shake_is_active:   bool,
-	shake_elapsed:     f32,
-	dust_timer:        f32,
-	flash_color:       Maybe(k2.Color),
-	flash_timer:       f32,
-	item_flashes:      [dynamic]ItemFlash,
-	floating_texts:    [16]FloatingText,
-	particle_pool:     []Particle,
-	score_base:        u32,
-	good_catch_magnet: f32,
-	// TODO: Make it part of the difficulty too?
-	good_catch_margin: f32,
+	shake_is_active: bool,
+	shake_elapsed:   f32,
+	dust_timer:      f32,
+	flash_color:     Maybe(k2.Color),
+	flash_timer:     f32,
+	item_flashes:    [dynamic]ItemFlash,
+	floating_texts:  [16]FloatingText,
+	particle_pool:   []Particle,
 }
 
 ItemFlash :: struct {
@@ -38,12 +34,9 @@ effects_init :: proc(allocator: runtime.Allocator, config: EffectsConfig) -> Eff
 		dust_timer = 0,
 		flash_color = nil,
 		flash_timer = 0,
-		score_base = 1,
 		floating_texts = empty,
 		item_flashes = make([dynamic]ItemFlash, 0, 16, allocator),
 		particle_pool = make([]Particle, max_particles, allocator),
-		good_catch_magnet = 1,
-		good_catch_margin = 1,
 	}
 }
 
@@ -82,23 +75,6 @@ effects_draw :: proc(config: GameConfig, rules: GameRules, effects: Effects) {
 	for particle in effects.particle_pool {
 		if particle.active do particle_draw(particle)
 	}
-}
-
-// TODO: Move
-get_multiplier :: proc(
-	effects: Effects,
-	preference: Maybe(ItemKind),
-	combo: u32,
-	item_kind: ItemKind,
-) -> u32 {
-	// TODO: Move this to config and/or play with formulas
-	item_multiplier: u32 = 2 if preference == item_kind else 1
-	return effects.score_base * item_multiplier * get_combo_multiplier(combo)
-}
-
-// TODO: Move this to config and/or play with formulas
-get_combo_multiplier :: proc(combo: u32) -> u32 {
-	return 1.0 + combo / 10
 }
 
 // TODO: Might need to do floating hearts too
