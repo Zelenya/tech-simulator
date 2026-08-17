@@ -140,19 +140,52 @@ ModifierKind :: enum {
 	Continue,
 }
 
+modifier_apply_rules :: proc(config: GameConfig, rules: ^GameRules, modifier: ModifierKind) {
+	effects := config.modifier_effects
+
+	#partial switch modifier {
+	case .Prestige:
+		rules.item_preference = effects.prestige_preference_item
+	case .TechStack:
+		rules.item_preference = effects.tech_stack_preference_item
+	case .Compensation:
+		rules.item_preference = effects.compensation_preference_item
+	case .RemoteWork:
+		rules.item_preference = effects.remote_work_preference_item
+
+	case .GiveConferenceTalk:
+		rules.good_catch_margin +=
+			config.player.width * effects.give_conference_talk_margin_multiplier
+		rules.good_catch_magnet *= effects.give_conference_talk_magnet_multiplier
+	case .HiringFreeze:
+		rules.item_speed *= effects.hiring_freeze_item_speed_multiplier
+
+	case .Burnout:
+		rules.item_speed *= effects.burnout_item_speed_multiplier
+		rules.score_base *= effects.burnout_score_base_multiplier
+	case .LeetCodeGrind:
+		rules.item_movement = .ErraticMotion
+	case .TightenCV:
+		rules.score_base *= effects.tighten_cv_score_base_multiplier
+	case .SprayAndPray:
+		rules.score_base /= effects.spray_and_pray_score_base_divisor
+
+	case .AutomatePipeline:
+		rules.item_movement = .MixedSpeed
+	case .BlindApplication:
+		rules.item_spawn_hidden = true
+	case .ImposterSyndrome:
+		rules.show_score = false
+	case .Bonus:
+		// TODO: Implement it (or as modifier)
+		rules.final_mode = true
+	}
+}
+
 modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: ModifierKind) {
 	effects := config.modifier_effects
 
-	switch modifier {
-	case .Prestige:
-		session.rules.item_preference = effects.prestige_preference_item
-	case .TechStack:
-		session.rules.item_preference = effects.tech_stack_preference_item
-	case .Compensation:
-		session.rules.item_preference = effects.compensation_preference_item
-	case .RemoteWork:
-		session.rules.item_preference = effects.remote_work_preference_item
-
+	#partial switch modifier {
 	case .AddPetProject:
 		append(&session.modifiers.runtime, PetProjectModifier{pending_items = 0, catches = 0})
 	case .AskForReferral:
@@ -167,23 +200,12 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 		}
 	case .FileUnemployment:
 		session.lives += effects.file_unemployment_lives_delta
-	case .GiveConferenceTalk:
-		session.rules.good_catch_margin +=
-			config.player.width * effects.give_conference_talk_margin_multiplier
-		session.rules.good_catch_magnet *= effects.give_conference_talk_magnet_multiplier
-	case .HiringFreeze:
-		// This conflicst with wave bumps?
-		session.rules.item_speed *= effects.hiring_freeze_item_speed_multiplier
 
-	case .Burnout:
-		session.rules.item_speed *= effects.burnout_item_speed_multiplier
-		session.rules.score_base *= effects.burnout_score_base_multiplier
 	case .LeetCodeGrind:
 		item_catalog_update_good_to_bad_ratio(
 			&session.item_catalog,
 			effects.leet_code_ratio_multiplier,
 		)
-		session.rules.item_movement = .ErraticMotion
 	case .LowerQualityBar:
 		item_catalog_update_good_to_bad_ratio(
 			&session.item_catalog,
@@ -203,12 +225,7 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 			&session.item_catalog,
 			effects.spray_and_pray_ratio_multiplier,
 		)
-		session.rules.score_base /= effects.spray_and_pray_score_base_divisor
 
-	case .AutomatePipeline:
-		session.rules.item_movement = .MixedSpeed
-	case .BlindApplication:
-		session.rules.item_spawn_hidden = true
 	case .GiveUp:
 		append(&session.modifiers.runtime, GiveUpModifier{elapsed = 0})
 	case .RecruiterSpam:
@@ -216,11 +233,6 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 			&session.modifiers.runtime,
 			RecruiterSpamModifier{cooldown = 0, elapsed = 0, pending_items = 0},
 		)
-	case .ImposterSyndrome:
-		session.rules.show_score = false
-	case .Bonus:
-		// TODO: Implement it (or as modifier)
-		session.rules.final_mode = true
 	case .Continue: // noop
 	}
 }
@@ -246,16 +258,9 @@ wave_next :: proc(
 
 	wave := config.waves[session.current_wave]
 
-	// TODO: It's kind of weird that we do modifiers and normal "speed ups", those could conflict
-	item_pool_next_wave(
-		rules = &session.rules,
-		item_pool = &session.item_pool,
-		spawn_multiplier = wave.spawn_multiplier,
-		speed_multiplier = wave.speed_multiplier,
-	)
-
-	// TODO: Consider explicit: picks[wave-1] = modifier
+	session.item_pool.setting_spawn_timer *= wave.spawn_multiplier
 	append(&session.modifier_picks, modifier)
+	session.rules = game_rules_rebuild(config, session.difficulty, session.modifier_picks[:])
 	modifier_apply(config, session, modifier)
 
 	return GameState.Playing

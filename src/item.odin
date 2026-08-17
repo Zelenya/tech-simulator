@@ -483,16 +483,6 @@ item_pool_try_spawn :: proc(
 	return true
 }
 
-item_pool_next_wave :: proc(
-	rules: ^GameRules,
-	item_pool: ^ItemPool,
-	spawn_multiplier: f32,
-	speed_multiplier: f32,
-) {
-	item_pool.setting_spawn_timer *= spawn_multiplier
-	rules.item_speed *= speed_multiplier
-}
-
 item_pool_reset_active :: proc(config: ItemPoolConfig, item_pool: ^ItemPool) {
 	clear(&item_pool.items)
 	item_pool.spawn_cooldown = item_pool.setting_spawn_timer

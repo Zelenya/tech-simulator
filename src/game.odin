@@ -37,6 +37,23 @@ game_rules_init :: proc(item_speed: f32) -> GameRules {
 	}
 }
 
+game_rules_rebuild :: proc(
+	config: GameConfig,
+	difficulty: Difficulty,
+	modifier_picks: []ModifierKind,
+) -> GameRules {
+	assert(len(modifier_picks) < len(config.waves))
+
+	rules := game_rules_init(config.difficulties[difficulty].item_speed)
+
+	for modifier, i in modifier_picks {
+		rules.item_speed *= config.waves[i + 1].speed_multiplier
+		modifier_apply_rules(config, &rules, modifier)
+	}
+
+	return rules
+}
+
 get_multiplier :: proc(rules: GameRules, combo: u32, item_kind: ItemKind) -> u32 {
 	// TODO: Move this to config and/or play with formulas
 	item_multiplier: u32 = 2 if rules.item_preference == item_kind else 1
