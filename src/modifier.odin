@@ -219,7 +219,6 @@ modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: Modifier
 			&session.item_catalog,
 			effects.tighten_cv_ratio_multiplier,
 		)
-		session.rules.score_base *= effects.tighten_cv_score_base_multiplier
 	case .SprayAndPray:
 		item_catalog_update_good_to_bad_ratio(
 			&session.item_catalog,
