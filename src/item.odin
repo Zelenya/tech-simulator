@@ -95,6 +95,24 @@ item_catalog_init :: proc(
 	return item_catalog
 }
 
+item_catalog_rebuild :: proc(
+	config: GameConfig,
+	modifier_picks: []ModifierKind,
+	catalog: ^ItemCatalog,
+) {
+	item_catalog_reset_from_config(config.items, config.item_pool, catalog)
+
+	preference: Maybe(ItemKind)
+	for modifier in modifier_picks {
+		new_preference, changes_preference := modifier_preference(
+			config.modifier_effects,
+			modifier,
+		).?
+		if changes_preference do preference = new_preference
+		modifier_apply_catalog(config.modifier_effects, preference, catalog, modifier)
+	}
+}
+
 item_catalog_reset_from_config :: proc(
 	item_configs: map[ItemKind]ItemConfig,
 	item_pool_config: ItemPoolConfig,
@@ -147,6 +165,7 @@ item_catalog_update_good_to_bad_ratio :: proc(item_catalog: ^ItemCatalog, multip
 	item_catalog.good_to_bad_ratio *= multiplier
 	item_catalog_refill(item_catalog)
 }
+
 
 ItemSpawnPolicy :: enum {
 	Normal,

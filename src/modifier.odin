@@ -143,16 +143,11 @@ ModifierKind :: enum {
 modifier_apply_rules :: proc(config: GameConfig, rules: ^GameRules, modifier: ModifierKind) {
 	effects := config.modifier_effects
 
-	#partial switch modifier {
-	case .Prestige:
-		rules.item_preference = effects.prestige_preference_item
-	case .TechStack:
-		rules.item_preference = effects.tech_stack_preference_item
-	case .Compensation:
-		rules.item_preference = effects.compensation_preference_item
-	case .RemoteWork:
-		rules.item_preference = effects.remote_work_preference_item
+	// These have special handling so we can reuse a bit of that code
+	preference, changes_preference := modifier_preference(effects, modifier).?
+	if changes_preference do rules.item_preference = preference
 
+	#partial switch modifier {
 	case .GiveConferenceTalk:
 		rules.good_catch_margin +=
 			config.player.width * effects.give_conference_talk_margin_multiplier
@@ -182,49 +177,67 @@ modifier_apply_rules :: proc(config: GameConfig, rules: ^GameRules, modifier: Mo
 	}
 }
 
+modifier_preference :: proc(
+	effects: ModifierEffectsConfig,
+	modifier: ModifierKind,
+) -> Maybe(ItemKind) {
+	#partial switch modifier {
+	case .Prestige:
+		return effects.prestige_preference_item
+	case .TechStack:
+		return effects.tech_stack_preference_item
+	case .Compensation:
+		return effects.compensation_preference_item
+	case .RemoteWork:
+		return effects.remote_work_preference_item
+	}
+
+	return nil
+}
+
+modifier_apply_catalog :: proc(
+	effects: ModifierEffectsConfig,
+	preference: Maybe(ItemKind),
+	catalog: ^ItemCatalog,
+	modifier: ModifierKind,
+) {
+	#partial switch modifier {
+	case .AskForReferral:
+		// We update preferences on the prev. wave, player should always have one
+		item_to_boost, has_preference := preference.?
+		if has_preference {
+			item_catalog_update_weight(
+				catalog,
+				item_to_boost,
+				effects.ask_for_referral_weight_multiplier,
+			)
+		}
+
+	case .LeetCodeGrind:
+		item_catalog_update_good_to_bad_ratio(catalog, effects.leet_code_ratio_multiplier)
+
+	case .LowerQualityBar:
+		item_catalog_update_good_to_bad_ratio(catalog, effects.lower_quality_bar_ratio_multiplier)
+
+	case .TightenCV:
+		item_catalog_update_good_to_bad_ratio(catalog, effects.tighten_cv_ratio_multiplier)
+
+	case .SprayAndPray:
+		item_catalog_update_good_to_bad_ratio(catalog, effects.spray_and_pray_ratio_multiplier)
+	}
+}
+
 modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: ModifierKind) {
 	effects := config.modifier_effects
 
 	#partial switch modifier {
 	case .AddPetProject:
 		append(&session.modifiers.runtime, PetProjectModifier{pending_items = 0, catches = 0})
-	case .AskForReferral:
-		// We update preferences on the prev. wave, player should always have one
-		item_to_boost, ok := session.rules.item_preference.?
-		if ok {
-			item_catalog_update_weight(
-				&session.item_catalog,
-				item_to_boost,
-				effects.ask_for_referral_weight_multiplier,
-			)
-		}
 	case .FileUnemployment:
 		session.lives += effects.file_unemployment_lives_delta
-
-	case .LeetCodeGrind:
-		item_catalog_update_good_to_bad_ratio(
-			&session.item_catalog,
-			effects.leet_code_ratio_multiplier,
-		)
 	case .LowerQualityBar:
-		item_catalog_update_good_to_bad_ratio(
-			&session.item_catalog,
-			effects.lower_quality_bar_ratio_multiplier,
-		)
 		// TODO: Should this be gated for people with one life?
 		session.lives += effects.lower_quality_bar_lives_delta
-	case .TightenCV:
-		// TODO: Should this be a game rule too?
-		item_catalog_update_good_to_bad_ratio(
-			&session.item_catalog,
-			effects.tighten_cv_ratio_multiplier,
-		)
-	case .SprayAndPray:
-		item_catalog_update_good_to_bad_ratio(
-			&session.item_catalog,
-			effects.spray_and_pray_ratio_multiplier,
-		)
-
 	case .GiveUp:
 		append(&session.modifiers.runtime, GiveUpModifier{elapsed = 0})
 	case .RecruiterSpam:
@@ -260,6 +273,7 @@ wave_next :: proc(
 	session.item_pool.setting_spawn_timer *= wave.spawn_multiplier
 	append(&session.modifier_picks, modifier)
 	session.rules = game_rules_rebuild(config, session.difficulty, session.modifier_picks[:])
+	item_catalog_rebuild(config, session.modifier_picks[:], &session.item_catalog)
 	modifier_apply(config, session, modifier)
 
 	return GameState.Playing
