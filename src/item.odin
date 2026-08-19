@@ -233,7 +233,7 @@ pick_weighted_item_kind_from :: proc(items: []WeightedItem, total_weight: f32) -
 	return items[0].kind
 }
 
-item_update :: proc(session: ^Session, item: ^Item, def: ItemDef, dt: f32) {
+item_update :: proc(rules: GameRules, player: Player, item: ^Item, def: ItemDef, dt: f32) {
 	item.spawn_elapsed += dt
 
 	// TODO: This is way to crud, just testing
@@ -257,9 +257,9 @@ item_update :: proc(session: ^Session, item: ^Item, def: ItemDef, dt: f32) {
 		}
 	}
 
-	if item_is_good(def) && session.rules.good_catch_magnet > 1 {
-		dir := session.player.x - item.x
-		item.x += dir * session.rules.good_catch_magnet * dt
+	if item_is_good(def) && rules.good_catch_magnet > 1 {
+		dir := player.x - item.x
+		item.x += dir * rules.good_catch_magnet * dt
 	}
 }
 
@@ -500,6 +500,42 @@ item_pool_try_spawn :: proc(
 	}
 
 	return true
+}
+
+item_pool_update :: proc(
+	rules: GameRules,
+	player: Player,
+	item_catalog: ItemCatalog,
+	item_pool: ^ItemPool,
+	screen_y: f32,
+	dt: f32,
+) -> []ItemOutcome {
+	item_outcomes := make([dynamic]ItemOutcome, 0, len(item_pool.items), context.temp_allocator)
+
+	i := 0
+	for i < len(item_pool.items) {
+		item := &item_pool.items[i]
+		def := item_catalog.by_kind[item.kind]
+
+		item_update(rules, player, item, def, dt)
+
+		// Item can be caught
+		_, is_good := def.effect.(GoodItemCaught)
+		collision_margin := rules.good_catch_margin if is_good else 0
+		is_colliding := has_collision(player, item^, collision_margin)
+		// Item can be leaving the screen
+		is_offscreen := item.y + item.height / 2 > screen_y
+		// Reconciliate into a terminal state/outcome
+		outcome, is_terminal := item_outcome(item^, def.effect, is_colliding, is_offscreen).?
+
+		if is_terminal {
+			_ = item_pool_remove_at(item_pool, i)
+			append(&item_outcomes, outcome)
+			// we removed the element and need to iterate with the same index
+		} else do i += 1
+	}
+
+	return item_outcomes[:]
 }
 
 item_pool_reset_active :: proc(config: ItemPoolConfig, item_pool: ^ItemPool) {

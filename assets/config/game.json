@@ -221,7 +221,7 @@
     {
       "kind": "give-up",
       "title": "Give Up",
-      "description": "Lose lives over time."
+      "description": "Lose lives over time, become immune to catching and missing items"
     },
     {
       "kind": "recruiter-spam",

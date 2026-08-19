@@ -12,15 +12,23 @@ GameState :: enum {
 }
 
 GameRules :: struct {
-	good_catch_magnet: f32,
-	good_catch_margin: f32,
-	item_preference:   Maybe(ItemKind),
-	item_movement:     ItemMovement,
-	item_speed:        f32,
-	score_base:        u32,
-	show_score:        bool,
-	item_spawn_hidden: bool,
-	final_mode:        bool,
+	good_catch_magnet:  f32,
+	good_catch_margin:  f32,
+	item_preference:    Maybe(ItemKind),
+	item_movement:      ItemMovement,
+	item_speed:         f32,
+	score_base:         u32,
+	show_score:         bool,
+	item_spawn_hidden:  bool,
+	item_damage_immune: bool,
+	final_mode:         bool,
+}
+
+ItemOutcomeSummary :: struct {
+	score_delta:      u32,
+	score_multiplier: u32,
+	combo_after:      u32,
+	lives_delta:      i8,
 }
 
 game_rules_init :: proc(item_speed: f32) -> GameRules {
@@ -33,6 +41,7 @@ game_rules_init :: proc(item_speed: f32) -> GameRules {
 		score_base = 1,
 		show_score = true,
 		item_spawn_hidden = false,
+		item_damage_immune = false,
 		final_mode = false,
 	}
 }
@@ -137,80 +146,35 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 		dt,
 	)
 
-	i := 0
-	// TODO: it's ok, but could be cleaned up
+	item_outcomes := item_pool_update(
+		session.rules,
+		session.player,
+		session.item_catalog,
+		&session.item_pool,
+		screen.y,
+		dt,
+	)
+
 	caught := false
-	for i < len(session.item_pool.items) {
-		item := &session.item_pool.items[i]
-		def := session.item_catalog.by_kind[item.kind]
+	for outcome in item_outcomes {
+		result := game_resolve_item_outcome(session.rules, session.combo, outcome)
 
-		item_update(session, item, def, dt)
+		session.score += result.score_delta
+		session.combo = result.combo_after
+		session.lives += result.lives_delta
 
-		// Item can be caught
-		_, is_good := def.effect.(GoodItemCaught)
-		collision_margin := session.rules.good_catch_margin if is_good else 0
-		is_colliding := has_collision(session.player, item^, collision_margin)
-		// Item can be leaving the screen
-		is_offscreen := item.y + item.height / 2 > screen.y
-		// Reconciliate into a terminal state/outcome
-		outcome, is_terminal := item_outcome(item^, def.effect, is_colliding, is_offscreen).?
-		if !is_terminal {
-			i += 1
-			continue
-		}
+		was_caught := item_outcome_feedback(
+			config.effects,
+			config.sounds,
+			session.player,
+			&session.effects,
+			outcome,
+			result,
+		)
+		caught = caught || was_caught
 
-		removed := item_pool_remove_at(&session.item_pool, i)
-		item_flash_spawn(&session.effects, removed)
-
-		switch outcome.kind {
-		case .CaughtGood:
-			k2.play_sound(config.sounds.by_kind[.CatchGood])
-			multiplier := get_multiplier(session.rules, session.combo, removed.kind)
-			// TODO: We should pass something closer to collision's x,y
-			floating_text_spawn(
-				&session.effects.floating_texts,
-				{session.player.x + session.player.width / 2, session.player.y - 10},
-				outcome.base_points,
-				multiplier,
-			)
-			session.score += outcome.base_points * multiplier
-			session.combo += 1
-			caught = true
-			modifiers_on_good_item_caught(config.modifier_effects, &session.modifiers)
-
-		case .CaughtBad:
-			k2.play_sound(config.sounds.by_kind[.CatchBad])
-			// TODO: Improve position passing (maybe trigger particles somewhere else)
-			particles_spawn(config.effects, &session.effects.particle_pool, {removed.x, removed.y})
-			if !modifier_is_active(session^, .GiveUp) {
-				effects_set_hit(config.effects, &session.effects, v2 = false)
-				session.lives -= 1
-			}
-			session.combo = 0
-			caught = true
-
-		case .CaughtNeutral:
-			k2.play_sound(config.sounds.by_kind[.CatchDull])
-			caught = true
-
-		case .MissedGood:
-			// TODO: Also should be event based
-			if !modifier_is_active(session^, .GiveUp) {
-				effects_set_hit(config.effects, &session.effects, v2 = true)
-				// TODO: Consider different sound
-				k2.play_sound(config.sounds.by_kind[.CatchBad])
-				effects_set_hit(config.effects, &session.effects, v2 = false)
-				session.lives -= 1
-			}
-			session.combo = 0
-
-		case .MissedOther: // No additional effects
-		}
-
-		// we removed the element and need to iterate with the same index
-		continue
+		modifiers_on_item_outcome(config.modifier_effects, &session.modifiers, outcome)
 	}
-
 
 	modifier_system_update(config.effects, config.modifier_effects, session, dt)
 	item_pool_spawn_modified(config, session, screen.x)
@@ -224,10 +188,77 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	} else {return .Playing}
 }
 
-modifier_is_active :: proc(session: Session, expected: ModifierKind) -> bool {
-	for &modifier in session.modifier_picks {
-		if modifier == expected do return true
+@(private = "file")
+game_resolve_item_outcome :: proc(
+	rules: GameRules,
+	combo: u32,
+	outcome: ItemOutcome,
+) -> ItemOutcomeSummary {
+	summary := ItemOutcomeSummary {
+		combo_after = combo,
 	}
+
+	switch outcome.kind {
+	case .CaughtGood:
+		summary.score_multiplier = get_multiplier(rules, combo, outcome.item.kind)
+		summary.score_delta = outcome.base_points * summary.score_multiplier
+		summary.combo_after = combo + 1
+	case .CaughtBad, .MissedGood:
+		summary.combo_after = 0
+		if !rules.item_damage_immune do summary.lives_delta = -1
+	case .CaughtNeutral, .MissedOther:
+	// noop (keep the combo)
+	}
+
+	return summary
+}
+
+@(private = "file")
+item_outcome_feedback :: proc(
+	config: EffectsConfig,
+	sounds: SoundsConfig,
+	player: Player,
+	effects: ^Effects,
+	outcome: ItemOutcome,
+	summary: ItemOutcomeSummary,
+) -> bool {
+	item_flash_spawn(effects, outcome.item)
+
+	switch outcome.kind {
+	case .CaughtGood:
+		k2.play_sound(sounds.by_kind[.CatchGood])
+		// TODO: We should pass something closer to collision's x,y
+		floating_text_spawn(
+			&effects.floating_texts,
+			{player.x + player.width / 2, player.y - 10},
+			outcome.base_points,
+			summary.score_multiplier,
+		)
+		return true
+
+	case .CaughtBad:
+		k2.play_sound(sounds.by_kind[.CatchBad])
+		// TODO: Improve position passing (maybe trigger particles somewhere else)
+		particles_spawn(config, &effects.particle_pool, {outcome.item.x, outcome.item.y})
+		if summary.lives_delta < 0 {
+			effects_set_hit(config, effects, v2 = false)
+		}
+		return true
+
+	case .CaughtNeutral:
+		k2.play_sound(sounds.by_kind[.CatchDull])
+		return true
+
+	case .MissedGood:
+		if summary.lives_delta < 0 {
+			// TODO: Consider different sound
+			k2.play_sound(sounds.by_kind[.CatchBad])
+			effects_set_hit(config, effects, v2 = true)
+		}
+
+	case .MissedOther: // No additional effects
+	}
+
 	return false
 }
 

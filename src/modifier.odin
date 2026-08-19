@@ -90,19 +90,22 @@ modifier_system_update :: proc(
 	}
 }
 
-modifiers_on_good_item_caught :: proc(
+modifiers_on_item_outcome :: proc(
 	modifier_config: ModifierEffectsConfig,
 	modifiers: ^ModifierSystem,
+	outcome: ItemOutcome,
 ) {
 	for &modifier in modifiers.runtime {
 		switch &state in modifier {
 		// TODO: This is the only one that has it, refactor
 		case PetProjectModifier:
-			state.catches += 1
+			if outcome.kind == .CaughtGood {
+				state.catches += 1
 
-			if state.catches >= modifier_config.add_pet_project_catch_number {
-				state.catches = 0
-				state.pending_items += 1
+				if state.catches >= modifier_config.add_pet_project_catch_number {
+					state.catches = 0
+					state.pending_items += 1
+				}
 			}
 		case GiveUpModifier:
 		case RecruiterSpamModifier:
@@ -171,6 +174,8 @@ modifier_apply_rules :: proc(config: GameConfig, rules: ^GameRules, modifier: Mo
 		rules.item_spawn_hidden = true
 	case .ImposterSyndrome:
 		rules.show_score = false
+	case .GiveUp:
+		rules.item_damage_immune = true
 	case .Bonus:
 		// TODO: Implement it (or as modifier)
 		rules.final_mode = true
@@ -227,9 +232,11 @@ modifier_apply_catalog :: proc(
 	}
 }
 
-modifier_apply :: proc(config: GameConfig, session: ^Session, modifier: ModifierKind) {
-	effects := config.modifier_effects
-
+modifier_activate :: proc(
+	effects: ModifierEffectsConfig,
+	session: ^Session,
+	modifier: ModifierKind,
+) {
 	#partial switch modifier {
 	case .AddPetProject:
 		append(&session.modifiers.runtime, PetProjectModifier{pending_items = 0, catches = 0})
@@ -264,17 +271,18 @@ wave_next :: proc(
 	dt: f32,
 ) -> GameState {
 	k2.play_sound(config.sounds.by_kind[.WaveNext])
+
 	// TODO: Similar check is duplicate in game loop
 	session.current_wave = min(session.current_wave + 1, len(config.waves) - 1)
 	session.wave_timer = 0
-
 	wave := config.waves[session.current_wave]
-
 	session.item_pool.setting_spawn_timer *= wave.spawn_multiplier
+
+	// Record selection, rebuild persistnet rules and catalog, update current runtime state
 	append(&session.modifier_picks, modifier)
 	session.rules = game_rules_rebuild(config, session.difficulty, session.modifier_picks[:])
 	item_catalog_rebuild(config, session.modifier_picks[:], &session.item_catalog)
-	modifier_apply(config, session, modifier)
+	modifier_activate(config.modifier_effects, session, modifier)
 
 	return GameState.Playing
 }
