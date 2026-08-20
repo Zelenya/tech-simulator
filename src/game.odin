@@ -2,6 +2,7 @@ package game
 
 import k2 "../karl2d"
 import "base:runtime"
+import "core:container/queue"
 import "core:fmt"
 
 GameState :: enum {
@@ -12,16 +13,16 @@ GameState :: enum {
 }
 
 GameRules :: struct {
-	good_catch_magnet:  f32,
-	good_catch_margin:  f32,
-	item_preference:    Maybe(ItemKind),
-	item_movement:      ItemMovement,
-	item_speed:         f32,
-	score_base:         u32,
-	show_score:         bool,
-	item_spawn_hidden:  bool,
-	item_damage_immune: bool,
-	final_mode:         bool,
+	good_catch_magnet:              f32,
+	good_catch_margin:              f32,
+	item_speed:                     f32,
+	score_base:                     u32,
+	item_hidden_until_screen_ratio: Maybe(f32),
+	item_preference:                Maybe(ItemKind),
+	item_movement:                  ItemMovement,
+	show_score:                     bool,
+	item_damage_immune:             bool,
+	final_mode:                     bool,
 }
 
 ItemOutcomeSummary :: struct {
@@ -35,12 +36,12 @@ game_rules_init :: proc(item_speed: f32) -> GameRules {
 	return GameRules {
 		good_catch_magnet = 1,
 		good_catch_margin = 1,
-		item_preference = nil,
-		item_movement = .Normal,
 		item_speed = item_speed,
 		score_base = 1,
+		item_hidden_until_screen_ratio = nil,
+		item_preference = nil,
+		item_movement = .Normal,
 		show_score = true,
-		item_spawn_hidden = false,
 		item_damage_immune = false,
 		final_mode = false,
 	}
@@ -173,11 +174,16 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 		)
 		caught = caught || was_caught
 
-		modifiers_on_item_outcome(config.modifier_effects, &session.modifiers, outcome)
+		modifiers_on_item_outcome(
+			config.modifier_effects,
+			&session.modifiers,
+			session.rules.item_preference,
+			outcome,
+		)
 	}
 
-	modifier_system_update(config.effects, config.modifier_effects, session, dt)
-	item_pool_spawn_modified(config, session, screen.x)
+	modifier_system_update(config.modifier_effects, &session.modifiers, dt)
+	game_process_modifier_actions(config, session, screen.x)
 	// TODO: This could return new location that we can pass down for effects
 	player_update_reaction(config.player, &session.player, caught, dt)
 	effects_update(config.effects, session.player, &session.effects, dt)
@@ -262,6 +268,31 @@ item_outcome_feedback :: proc(
 	return false
 }
 
+@(private = "file")
+game_process_modifier_actions :: proc(config: GameConfig, session: ^Session, screen_x: f32) {
+	for _ in 0 ..< queue.len(session.modifiers.pending) {
+		pending_action := queue.pop_front(&session.modifiers.pending)
+
+		switch action in pending_action {
+		case SpawnItemAction:
+			spawned := item_pool_try_spawn(
+				config.items,
+				session.rules,
+				session.item_catalog,
+				&session.item_pool,
+				action.item_kind,
+				.BypassCap,
+				screen_x,
+			)
+			if !spawned do queue.push_back(&session.modifiers.pending, pending_action)
+
+		case ChangeLivesAction:
+			session.lives += action.delta
+			effects_set_hit(config.effects, &session.effects, v2 = false)
+		}
+	}
+}
+
 // TODO: Replay the modifier picks?
 // TODO: Otherwise we have rules in half-reloaded state
 game_reload :: proc(config: GameConfig, session: ^Session) {
@@ -272,12 +303,6 @@ game_reload :: proc(config: GameConfig, session: ^Session) {
 	session.current_wave = min(session.current_wave, len(config.waves) - 1)
 }
 
-has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
-	player_box := k2.rect_from_pos_size({player.x, player.y}, {player.width, player.height})
-	// TODO: What if item is a circle? Does it matter much?
-	item_box := k2.rect_from_pos_size({item.x, item.y}, {item.width, item.height})
-	return k2.rect_overlapping(player_box, k2.rect_expand(item_box, margin, margin))
-}
 
 game_draw :: proc(config: GameConfig, session: Session) {
 	screen := game_screen_size()

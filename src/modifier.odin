@@ -2,6 +2,7 @@ package game
 
 import k2 "../karl2d"
 import "base:runtime"
+import "core:container/queue"
 import "core:math/rand"
 
 Difficulty :: enum {
@@ -11,8 +12,7 @@ Difficulty :: enum {
 }
 
 PetProjectModifier :: struct {
-	catches:       u32,
-	pending_items: u32,
+	catches: u32,
 }
 
 GiveUpModifier :: struct {
@@ -20,9 +20,8 @@ GiveUpModifier :: struct {
 }
 
 RecruiterSpamModifier :: struct {
-	cooldown:      f32,
-	elapsed:       f32,
-	pending_items: u32,
+	cooldown: f32,
+	elapsed:  f32,
 }
 
 ModifierRuntime :: union {
@@ -31,42 +30,52 @@ ModifierRuntime :: union {
 	RecruiterSpamModifier,
 }
 
+SpawnItemAction :: struct {
+	item_kind: Maybe(ItemKind),
+}
+
+ChangeLivesAction :: struct {
+	delta: i8,
+}
+
+ModifierAction :: union {
+	SpawnItemAction,
+	ChangeLivesAction,
+}
+
 ModifierSystem :: struct {
 	runtime: [dynamic]ModifierRuntime,
+	pending: queue.Queue(ModifierAction),
 }
 
 // TODO: Add a way to pre-select/debug the picks
 // TODO: Show the modifiers and score at the end for debuffs
 modifier_system_init :: proc(allocator: runtime.Allocator) -> ModifierSystem {
+	pending_queue: queue.Queue(ModifierAction)
+	queue.init(&pending_queue, capacity = 8, allocator = allocator)
+
 	// TODO: check the limits, we shouldn't have that many ~4 capacity is ok to start with
-	return ModifierSystem{runtime = make([dynamic]ModifierRuntime, 0, 4, allocator)}
+	return ModifierSystem {
+		runtime = make([dynamic]ModifierRuntime, 0, 4, allocator),
+		pending = pending_queue,
+	}
 }
 
 modifier_system_update :: proc(
-	effect_config: EffectsConfig,
 	modifier_config: ModifierEffectsConfig,
-	session: ^Session,
+	modifiers: ^ModifierSystem,
 	dt: f32,
 ) {
-	if session.rules.item_spawn_hidden {
-		screen := game_screen_size()
-		fog_line := screen.y * modifier_config.blind_application_hidden_ratio
-
-		for &item in session.item_pool.items {
-			if item.y > fog_line do item.hidden = false
-		}
-	}
-
 	i := 0
-	for i < len(session.modifiers.runtime) {
-		modifier := &session.modifiers.runtime[i]
-		switch &state in modifier {
+	for i < len(modifiers.runtime) {
+		has_expired := false
+
+		switch &state in &modifiers.runtime[i] {
 		case PetProjectModifier:
 		case GiveUpModifier:
 			state.elapsed += dt
 			if state.elapsed >= modifier_config.give_up_timer {
-				session.lives -= 1
-				effects_set_hit(effect_config, &session.effects, v2 = false)
+				queue.push_back(&modifiers.pending, ChangeLivesAction{delta = -1})
 				state.elapsed = 0
 			}
 		case RecruiterSpamModifier:
@@ -74,41 +83,35 @@ modifier_system_update :: proc(
 			state.cooldown += dt
 
 			if state.cooldown >= modifier_config.recruiter_spawn_rate {
-				state.pending_items += 1
+				queue.push_back(&modifiers.pending, SpawnItemAction{ItemKind.Neutral})
 				state.cooldown = 0
 			}
 
-			if state.elapsed >= modifier_config.recruiter_spawn_timer {
-				// TODO: Need to remove the modifier from picks too or mark it inactive?
-				// And maybe do this better too
-				unordered_remove(&session.modifiers.runtime, i)
-				state.elapsed = 0
-				continue
-			}
+			has_expired = state.elapsed >= modifier_config.recruiter_spawn_timer
 		}
-		i += 1
+
+		if has_expired do unordered_remove(&modifiers.runtime, i)
+		else do i += 1
 	}
 }
 
 modifiers_on_item_outcome :: proc(
 	modifier_config: ModifierEffectsConfig,
 	modifiers: ^ModifierSystem,
+	item_preference: Maybe(ItemKind),
 	outcome: ItemOutcome,
 ) {
 	for &modifier in modifiers.runtime {
-		switch &state in modifier {
-		// TODO: This is the only one that has it, refactor
+		#partial switch &state in modifier {
 		case PetProjectModifier:
 			if outcome.kind == .CaughtGood {
 				state.catches += 1
 
 				if state.catches >= modifier_config.add_pet_project_catch_number {
 					state.catches = 0
-					state.pending_items += 1
+					queue.push_back(&modifiers.pending, SpawnItemAction{item_preference})
 				}
 			}
-		case GiveUpModifier:
-		case RecruiterSpamModifier:
 		}
 	}
 }
@@ -171,7 +174,7 @@ modifier_apply_rules :: proc(config: GameConfig, rules: ^GameRules, modifier: Mo
 	case .AutomatePipeline:
 		rules.item_movement = .MixedSpeed
 	case .BlindApplication:
-		rules.item_spawn_hidden = true
+		rules.item_hidden_until_screen_ratio = effects.blind_application_hidden_ratio
 	case .ImposterSyndrome:
 		rules.show_score = false
 	case .GiveUp:
@@ -234,24 +237,27 @@ modifier_apply_catalog :: proc(
 
 modifier_activate :: proc(
 	effects: ModifierEffectsConfig,
-	session: ^Session,
+	modifiers: ^ModifierSystem,
 	modifier: ModifierKind,
 ) {
 	#partial switch modifier {
 	case .AddPetProject:
-		append(&session.modifiers.runtime, PetProjectModifier{pending_items = 0, catches = 0})
+		append(&modifiers.runtime, PetProjectModifier{catches = 0})
 	case .FileUnemployment:
-		session.lives += effects.file_unemployment_lives_delta
+		queue.push_back(
+			&modifiers.pending,
+			ChangeLivesAction{delta = effects.file_unemployment_lives_delta},
+		)
 	case .LowerQualityBar:
 		// TODO: Should this be gated for people with one life?
-		session.lives += effects.lower_quality_bar_lives_delta
-	case .GiveUp:
-		append(&session.modifiers.runtime, GiveUpModifier{elapsed = 0})
-	case .RecruiterSpam:
-		append(
-			&session.modifiers.runtime,
-			RecruiterSpamModifier{cooldown = 0, elapsed = 0, pending_items = 0},
+		queue.push_back(
+			&modifiers.pending,
+			ChangeLivesAction{delta = effects.lower_quality_bar_lives_delta},
 		)
+	case .GiveUp:
+		append(&modifiers.runtime, GiveUpModifier{elapsed = 0})
+	case .RecruiterSpam:
+		append(&modifiers.runtime, RecruiterSpamModifier{cooldown = 0, elapsed = 0})
 	case .Continue: // noop
 	}
 }
@@ -282,7 +288,7 @@ wave_next :: proc(
 	append(&session.modifier_picks, modifier)
 	session.rules = game_rules_rebuild(config, session.difficulty, session.modifier_picks[:])
 	item_catalog_rebuild(config, session.modifier_picks[:], &session.item_catalog)
-	modifier_activate(config.modifier_effects, session, modifier)
+	modifier_activate(config.modifier_effects, &session.modifiers, modifier)
 
 	return GameState.Playing
 }

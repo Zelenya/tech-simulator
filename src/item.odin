@@ -194,6 +194,7 @@ item_init :: proc(
 ) -> Item {
 	kind := item_kind.? or_else pick_weighted_item_kind(item_catalog)
 	config := item_configs[kind]
+	_, starts_hidden := rules.item_hidden_until_screen_ratio.?
 
 	return Item {
 		x = rand.float32_range(0, screen_x - config.width / 2),
@@ -205,7 +206,7 @@ item_init :: proc(
 		kind = kind,
 		spawn_elapsed = 0,
 		spawn_policy = spawn_policy,
-		hidden = rules.item_spawn_hidden,
+		hidden = starts_hidden,
 	}
 }
 
@@ -431,47 +432,6 @@ item_pool_update_spawn :: proc(
 	}
 }
 
-// TODO: Merge with above when we have better event/modifiers handling
-item_pool_spawn_modified :: proc(config: GameConfig, session: ^Session, screen_x: f32) {
-	for &modifier in session.modifiers.runtime {
-		switch &state in modifier {
-		case PetProjectModifier:
-			to_spawn := state.pending_items
-			for _ in 0 ..< to_spawn {
-				spawned := item_pool_try_spawn(
-					config.items,
-					session.rules,
-					session.item_catalog,
-					&session.item_pool,
-					session.rules.item_preference,
-					ItemSpawnPolicy.BypassCap,
-					screen_x,
-				)
-
-				if !spawned do break
-				state.pending_items -= 1
-			}
-		case GiveUpModifier:
-		case RecruiterSpamModifier:
-			to_spawn := state.pending_items
-			for _ in 0 ..< to_spawn {
-				spawned := item_pool_try_spawn(
-					config.items,
-					session.rules,
-					session.item_catalog,
-					&session.item_pool,
-					.Neutral,
-					ItemSpawnPolicy.BypassCap,
-					screen_x,
-				)
-
-				if !spawned do break
-				state.pending_items -= 1
-			}
-		}
-	}
-}
-
 item_pool_try_spawn :: proc(
 	items_config: map[ItemKind]ItemConfig,
 	rules: GameRules,
@@ -519,6 +479,12 @@ item_pool_update :: proc(
 
 		item_update(rules, player, item, def, dt)
 
+		hidden_until_ratio, has_hidden_rule := rules.item_hidden_until_screen_ratio.?
+
+		if item.hidden && has_hidden_rule && item.y > screen_y * hidden_until_ratio {
+			item.hidden = false
+		}
+
 		// Item can be caught
 		_, is_good := def.effect.(GoodItemCaught)
 		collision_margin := rules.good_catch_margin if is_good else 0
@@ -536,6 +502,15 @@ item_pool_update :: proc(
 	}
 
 	return item_outcomes[:]
+}
+
+
+@(private = "file")
+has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
+	player_box := k2.rect_from_pos_size({player.x, player.y}, {player.width, player.height})
+	// TODO: What if item is a circle? Does it matter much?
+	item_box := k2.rect_from_pos_size({item.x, item.y}, {item.width, item.height})
+	return k2.rect_overlapping(player_box, k2.rect_expand(item_box, margin, margin))
 }
 
 item_pool_reset_active :: proc(config: ItemPoolConfig, item_pool: ^ItemPool) {
