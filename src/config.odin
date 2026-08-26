@@ -31,6 +31,7 @@ GameConfig :: struct {
 	sounds:           SoundsConfig,
 	waves:            []WaveConfig,
 	updated_at:       time.Time,
+	attempted_at:     time.Time,
 }
 
 GameConfigRaw :: struct {
@@ -275,66 +276,129 @@ WaveConfigData :: struct($Modifier: typeid) {
 WaveConfigRaw :: WaveConfigData(string)
 WaveConfig :: WaveConfigData(ModifierKind)
 
-game_config_load :: proc(allocator: runtime.Allocator) -> GameConfig {
-	config_path := asset_path_required("config/game.json", "game config")
-	data, os_err := os.read_entire_file(config_path, context.temp_allocator)
-	if os_err != nil {
-		fmt.eprintln("Failed to read the config file", config_path, os.error_string(os_err))
-		panic("Failed to read the config file")
+ConfigSnapshot :: struct {
+	arena: runtime.Arena,
+	value: GameConfig,
+}
+
+@(private = "file")
+game_config_snapshot_create :: proc(gpa: runtime.Allocator) -> ^ConfigSnapshot {
+	snapshot := new(ConfigSnapshot, gpa)
+	snapshot.arena.backing_allocator = gpa
+	return snapshot
+}
+
+game_config_snapshot_destroy :: proc(snapshot: ^ConfigSnapshot) {
+	if snapshot == nil do return
+
+	backing_allocator := snapshot.arena.backing_allocator
+	game_config_destroy(&snapshot.value)
+	runtime.arena_destroy(&snapshot.arena)
+	free(snapshot, backing_allocator)
+}
+
+game_config_load :: proc(gpa: runtime.Allocator) -> ^ConfigSnapshot {
+	snapshot := game_config_snapshot_create(gpa)
+	config_allocator := runtime.arena_allocator(&snapshot.arena)
+
+	path := asset_path_required("config/game.json", "game config")
+
+	updated_at, time_err := os.last_write_time_by_name(path)
+	if time_err != nil {
+		fmt.eprintfln("Failed to read config write time '%v': %v", path, os.error_string(time_err))
+		panic("Failed to load game config")
 	}
 
+	raw, maybe_error := game_config_read_raw(path)
+	if message, failed := maybe_error.?; failed {
+		fmt.eprintln(message)
+		panic("Failed to load game config")
+	}
+
+	snapshot.value = parse_game_config(config_allocator, raw, updated_at)
+	return snapshot
+}
+
+ConfigReloadStatus :: enum {
+	Unchanged,
+	ReadyToReload,
+	Rejected,
+}
+
+game_config_reload :: proc(
+	current: ^ConfigSnapshot,
+) -> (
+	candidate: ^ConfigSnapshot,
+	status: ConfigReloadStatus,
+) {
+	path := asset_path_required("config/game.json", "game config")
+
+	last_write_at, time_err := os.last_write_time_by_name(path)
+	if time_err != nil {
+		fmt.eprintfln("Failed to read config write time '%v': %v", path, os.error_string(time_err))
+		// TODO: Which is safer or has less friction?
+		// panic("Failed to load game config")
+		return nil, .Rejected
+	}
+
+	if last_write_at == current.value.attempted_at {
+		return nil, .Unchanged
+	}
+
+	// Record this before attempting the read (not to retry the same broken edit on every frame)
+	current.value.attempted_at = last_write_at
+
+	raw, maybe_error := game_config_read_raw(path)
+	if message, failed := maybe_error.?; failed {
+		fmt.eprintln(message)
+		return nil, .Rejected
+	}
+
+	gpa := current.arena.backing_allocator
+	candidate = game_config_snapshot_create(gpa)
+	candidate_allocator := runtime.arena_allocator(&candidate.arena)
+
+	candidate.value = parse_game_config(candidate_allocator, raw, last_write_at)
+
+	return candidate, .ReadyToReload
+}
+
+@(private = "file")
+game_config_read_raw :: proc(path: string) -> (raw: GameConfigRaw, err: Maybe(string)) {
+	data, os_err := os.read_entire_file(path, context.temp_allocator)
+	if os_err != nil {
+		fmt.eprintfln("Failed to read required config '%v': %v", path, os.error_string(os_err))
+		panic("Failed to read required game config")
+	}
+
+	return game_config_decode_raw(data)
+}
+
+@(private = "file")
+game_config_decode_raw :: proc(data: []byte) -> (raw: GameConfigRaw, err: Maybe(string)) {
 	// I don't want to miss and zero-init any config value, so I'd rather double decode.
 	// This validates basic shape (object/slices/required fields), the second unmarshalling checks the primitive types
 	config_json: json.Value
 	json_err := json.unmarshal(data, &config_json, allocator = context.temp_allocator)
 	if json_err != nil {
-		fmt.eprintln("Failed to decode the raw config file", json_err)
-		panic("Failed to decode the raw config file")
+		return {}, fmt.tprintf("Failed to decode config JSON: %v", json_err)
 	}
-	expected_shape := type_info_of(GameConfigRaw)
-	if err, shape_ok := config_validate_shape(config_json, expected_shape, "game_config");
-	   !shape_ok {
-		fmt.eprintln(err)
-		panic("Invalid config")
+
+	if message, shape_ok := config_validate_shape(
+		config_json,
+		type_info_of(GameConfigRaw),
+		"game_config",
+	); !shape_ok {
+		return {}, message
 	}
 
 	raw_config: GameConfigRaw
 	json_err = json.unmarshal(data, &raw_config, allocator = context.temp_allocator)
 	if json_err != nil {
-		fmt.eprintln("Failed to decode the config file", json_err)
-		panic("Failed to decode the config file")
+		return {}, fmt.tprintf("Failed to decode typed config: %v", json_err)
 	}
 
-	last_write_at, time_err := os.last_write_time_by_name(config_path)
-	if time_err != nil {
-		fmt.eprintln("Failed to read config's write time", config_path, os.error_string(time_err))
-		panic("Failed to read the config's write time")
-	}
-
-	return parse_game_config(allocator, raw_config, last_write_at)
-}
-
-game_config_reload :: proc(allocator: runtime.Allocator, game_config: ^GameConfig) -> bool {
-	config_path := asset_path_required("config/game.json", "game_config")
-	last_write_at, time_err := os.last_write_time_by_name(config_path)
-
-	if time_err != nil {
-		fmt.eprintln(
-			"Failed to re-read config's write time",
-			config_path,
-			os.error_string(time_err),
-		)
-		panic("Failed to re-read the config's write time")
-	}
-
-	if last_write_at != game_config.updated_at {
-		game_config_destroy(game_config)
-		free_all(allocator)
-		game_config^ = game_config_load(allocator)
-		return true
-	} else {
-		return false
-	}
+	return raw_config, nil
 }
 
 config_validate_shape :: proc(
@@ -429,6 +493,7 @@ parse_game_config :: proc(
 		items = parse_items_config(allocator, raw.items, item_pool.good_to_bad_ratio),
 		sounds = parse_sound_config(allocator, raw.sounds),
 		updated_at = updated_at,
+		attempted_at = updated_at,
 	}
 }
 

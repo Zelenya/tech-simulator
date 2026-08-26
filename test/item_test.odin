@@ -9,15 +9,16 @@ item_pool_spawn_caps_only_normal_items :: proc(t: ^testing.T) {
 	map_insert(&items_config, game.ItemKind.Normal, game.ItemConfig{width = 20, height = 20})
 	defer delete(items_config)
 
-	rules: game.GameRules
+	rules := game.GameRules {
+		item_normal_cap = 1,
+		item_hard_cap   = 3,
+	}
 	item_catalog: game.ItemCatalog
 	screen_x: f32 = 800
 
-	// Normal cap is 1 (total hard cap is 3)
 	item_pool := game.item_pool_init(
 		context.allocator,
-		active_cap = 1,
-		hard_cap = 3,
+		hard_cap = rules.item_hard_cap,
 		spawn_cooldown = 0,
 	)
 	defer delete(item_pool.items)

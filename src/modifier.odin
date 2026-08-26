@@ -281,13 +281,15 @@ wave_next :: proc(
 	// TODO: Similar check is duplicate in game loop
 	session.current_wave = min(session.current_wave + 1, len(config.waves) - 1)
 	session.wave_timer = 0
-	wave := config.waves[session.current_wave]
-	session.item_pool.setting_spawn_timer *= wave.spawn_multiplier
+
+	spawn_interval := config.difficulties[session.difficulty].spawn_interval
+	for wave_index in 1 ..= len(session.modifier_picks) {
+		spawn_interval *= config.waves[wave_index].spawn_multiplier
+	}
 
 	// Record selection, rebuild persistnet rules and catalog, update current runtime state
 	append(&session.modifier_picks, modifier)
-	session.rules = game_rules_rebuild(config, session.difficulty, session.modifier_picks[:])
-	item_catalog_rebuild(config, session.modifier_picks[:], &session.item_catalog)
+	game_session_rebuild(config, session)
 	modifier_activate(config.modifier_effects, &session.modifiers, modifier)
 
 	return GameState.Playing

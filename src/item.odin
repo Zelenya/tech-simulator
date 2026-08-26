@@ -380,27 +380,19 @@ get_item_color :: proc(preference: Maybe(ItemKind), item: ItemConfig) -> k2.Colo
 }
 
 ItemPool :: struct {
-	// TODO: Move the settings?
-	setting_spawn_timer: f32,
-	setting_normal_cap:  u8,
-	setting_hard_cap:    u8,
-	items:               [dynamic]Item,
-	normal_active:       u8,
-	spawn_cooldown:      f32,
+	items:          [dynamic]Item,
+	normal_active:  u8,
+	spawn_cooldown: f32,
 }
 
 // TODO: Should probably just create outside of screen anyways, and then change this on spawn.
 // Also should properly pre-allocate and pre-create a list of items and reuse
 item_pool_init :: proc(
 	allocator: runtime.Allocator,
-	active_cap: u8,
 	hard_cap: u8,
 	spawn_cooldown: f32,
 ) -> ItemPool {
 	return ItemPool {
-		setting_spawn_timer = spawn_cooldown,
-		setting_normal_cap = active_cap,
-		setting_hard_cap = hard_cap,
 		items = make([dynamic]Item, 0, hard_cap, allocator),
 		normal_active = 0,
 		spawn_cooldown = spawn_cooldown,
@@ -419,7 +411,7 @@ item_pool_update_spawn :: proc(
 ) {
 	item_pool.spawn_cooldown -= dt
 	if item_pool.spawn_cooldown <= 0 {
-		item_pool.spawn_cooldown = item_pool.setting_spawn_timer
+		item_pool.spawn_cooldown = rules.item_spawn_interval
 		item_pool_try_spawn(
 			config.items,
 			rules,
@@ -443,12 +435,12 @@ item_pool_try_spawn :: proc(
 ) -> bool {
 	// TODO: If we switch to pre-allocated limited array we won't need this
 	// Everyone respects the hard cap
-	if len(item_pool.items) >= int(item_pool.setting_hard_cap) {
+	if len(item_pool.items) >= int(rules.item_hard_cap) {
 		return false
 	}
 
 	// Normal spawns respect the normal cap, special/modifiers don't
-	if policy == .Normal && item_pool.normal_active >= item_pool.setting_normal_cap {
+	if policy == .Normal && item_pool.normal_active >= rules.item_normal_cap {
 		return false
 	}
 
@@ -513,11 +505,10 @@ has_collision :: proc(player: Player, item: Item, margin: f32 = 0) -> bool {
 	return k2.rect_overlapping(player_box, k2.rect_expand(item_box, margin, margin))
 }
 
-item_pool_reset_active :: proc(config: ItemPoolConfig, item_pool: ^ItemPool) {
+item_pool_reset_active :: proc(rules: GameRules, item_pool: ^ItemPool) {
 	clear(&item_pool.items)
-	item_pool.spawn_cooldown = item_pool.setting_spawn_timer
-	item_pool.setting_hard_cap = config.hard_cap
 	item_pool.normal_active = 0
+	item_pool.spawn_cooldown = rules.item_spawn_interval
 }
 
 item_pool_remove_at :: proc(pool: ^ItemPool, index: int) -> Item {

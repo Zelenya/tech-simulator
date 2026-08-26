@@ -22,7 +22,7 @@ game_rules_rebuild_replays_rules_without_compounding :: proc(t: ^testing.T) {
 
 	picks := [4]game.ModifierKind{.HiringFreeze, .Burnout, .LeetCodeGrind, .AutomatePipeline}
 
-	first := game.game_rules_rebuild(config, game.Difficulty.Easy, picks[:])
+	first := game.game_rules_build(config, game.Difficulty.Easy, picks[:])
 
 	// 100 × 2 × 0.5 × 3 × 2 = 600
 	testing.expect_value(t, first.item_speed, f32(600))
@@ -30,6 +30,6 @@ game_rules_rebuild_replays_rules_without_compounding :: proc(t: ^testing.T) {
 	testing.expect_value(t, first.item_movement, game.ItemMovement.MixedSpeed)
 
 	// Rebuilding from the same inputs, is "idempotent" (doesn't compound effects)
-	second := game.game_rules_rebuild(config, game.Difficulty.Easy, picks[:])
+	second := game.game_rules_build(config, game.Difficulty.Easy, picks[:])
 	testing.expect_value(t, second, first)
 }

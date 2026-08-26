@@ -20,6 +20,11 @@ GameRules :: struct {
 	item_hidden_until_screen_ratio: Maybe(f32),
 	item_preference:                Maybe(ItemKind),
 	item_movement:                  ItemMovement,
+	item_spawn_interval:            f32,
+	item_normal_cap:                u8,
+	// TODO: Not sure this is the right place for it
+	// Revisit when cleaning up the pools of items
+	item_hard_cap:                  u8,
 	show_score:                     bool,
 	item_damage_immune:             bool,
 	final_mode:                     bool,
@@ -32,32 +37,34 @@ ItemOutcomeSummary :: struct {
 	lives_delta:      i8,
 }
 
-game_rules_init :: proc(item_speed: f32) -> GameRules {
-	return GameRules {
-		good_catch_magnet = 1,
-		good_catch_margin = 1,
-		item_speed = item_speed,
-		score_base = 1,
-		item_hidden_until_screen_ratio = nil,
-		item_preference = nil,
-		item_movement = .Normal,
-		show_score = true,
-		item_damage_immune = false,
-		final_mode = false,
-	}
-}
-
-game_rules_rebuild :: proc(
+game_rules_build :: proc(
 	config: GameConfig,
 	difficulty: Difficulty,
 	modifier_picks: []ModifierKind,
 ) -> GameRules {
 	assert(len(modifier_picks) < len(config.waves))
 
-	rules := game_rules_init(config.difficulties[difficulty].item_speed)
+	settings := config.difficulties[difficulty]
+	rules := GameRules {
+		good_catch_magnet              = 1,
+		good_catch_margin              = 1,
+		item_speed                     = settings.item_speed,
+		score_base                     = 1,
+		item_spawn_interval            = settings.spawn_interval,
+		item_normal_cap                = settings.max_active,
+		item_hard_cap                  = config.item_pool.hard_cap,
+		item_hidden_until_screen_ratio = nil,
+		item_preference                = nil,
+		item_movement                  = .Normal,
+		show_score                     = true,
+		item_damage_immune             = false,
+		final_mode                     = false,
+	}
 
 	for modifier, i in modifier_picks {
-		rules.item_speed *= config.waves[i + 1].speed_multiplier
+		wave := config.waves[i + 1]
+		rules.item_speed *= wave.speed_multiplier
+		rules.item_spawn_interval *= wave.spawn_multiplier
 		modifier_apply_rules(config, &rules, modifier)
 	}
 
@@ -104,12 +111,10 @@ game_init :: proc(
 		item_catalog   = item_catalog_init(allocator, config.items, config.item_pool),
 		item_pool      = item_pool_init(
 			allocator,
-			settings.max_active,
 			config.item_pool.hard_cap,
 			settings.spawn_interval,
 		),
-		// TODO: pass and refactor more basic things from config
-		rules          = game_rules_init(settings.item_speed),
+		rules          = game_rules_build(config, difficulty, nil),
 		modifiers      = modifier_system_init(allocator),
 		difficulty     = difficulty,
 		// TODO: Max is number of waves
@@ -121,6 +126,11 @@ game_init :: proc(
 		current_wave   = 0,
 		wave_timer     = 0,
 	}
+}
+
+game_session_rebuild :: proc(config: GameConfig, session: ^Session) {
+	session.rules = game_rules_build(config, session.difficulty, session.modifier_picks[:])
+	item_catalog_rebuild(config, session.modifier_picks[:], &session.item_catalog)
 }
 
 // TODO: Introduce events for catch items, etc. to make this manageable
@@ -297,12 +307,11 @@ game_process_modifier_actions :: proc(config: GameConfig, session: ^Session, scr
 // TODO: Otherwise we have rules in half-reloaded state
 game_reload :: proc(config: GameConfig, session: ^Session) {
 	item_catalog_reset_from_config(config.items, config.item_pool, &session.item_catalog)
-	item_pool_reset_active(config.item_pool, &session.item_pool)
+	item_pool_reset_active(session.rules, &session.item_pool)
 	session.player = player_init(config.player)
 	// in case we remove a wave:
 	session.current_wave = min(session.current_wave, len(config.waves) - 1)
 }
-
 
 game_draw :: proc(config: GameConfig, session: Session) {
 	screen := game_screen_size()

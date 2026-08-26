@@ -8,7 +8,9 @@ main :: proc() {
 	memory: AppMemory
 	memory_init(&memory)
 
-	config := game_config_load(memory.config)
+	current_config: ^ConfigSnapshot = game_config_load(context.allocator)
+	config := current_config.value
+
 	game_state := GameState.WaveMenu
 	session: Session
 	wave_menu: ActiveWaveMenu = wave_menu_init(config.cards, config.difficulties)
@@ -18,7 +20,12 @@ main :: proc() {
 		k2.clear(k2.LIGHT_BLUE)
 		set_game_camera()
 
-		if game_config_reload(memory.config, &config) {
+		// Hot config reload:
+		config_candidate, config_status := game_config_reload(current_config)
+		if config_status == .ReadyToReload {
+			previous := current_config
+			current_config = config_candidate
+			config = current_config.value
 			switch game_state {
 			case .WaveMenu:
 				switch menu in wave_menu {
@@ -32,8 +39,10 @@ main :: proc() {
 				game_reload(config, &session)
 			case .GameOver:
 			}
+			game_config_snapshot_destroy(previous)
 		}
 
+		// Transition between game states and game loops:
 		switch game_state {
 		case .WaveMenu:
 			switch &menu in wave_menu {
@@ -83,8 +92,8 @@ main :: proc() {
 		free_all(context.temp_allocator)
 	}
 
-	game_config_destroy(&config)
-	free_all(memory.config)
+	// Clean up:
+	game_config_snapshot_destroy(current_config)
 	free_all(memory.session)
 	k2.shutdown()
 }
