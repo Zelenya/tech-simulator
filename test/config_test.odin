@@ -2,13 +2,14 @@ package game_tests
 
 import game "../src"
 import "core:encoding/json"
-import "core:testing"
 import "core:os"
+import "core:testing"
 
 @(test)
 game_config_json_has_expected_shape :: proc(t: ^testing.T) {
 	_ = t
-	config_path := game.asset_path_required("config/game.json", "game config")
+	config_path, path_err := game.asset_path_required("config/game.json", "game config")
+	assert(path_err == nil)
 	data, os_err := os.read_entire_file(config_path, context.temp_allocator)
 	assert(os_err == nil)
 

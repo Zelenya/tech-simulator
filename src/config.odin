@@ -301,7 +301,8 @@ game_config_load :: proc(gpa: runtime.Allocator) -> ^ConfigSnapshot {
 	snapshot := game_config_snapshot_create(gpa)
 	config_allocator := runtime.arena_allocator(&snapshot.arena)
 
-	path := asset_path_required("config/game.json", "game config")
+	path, path_err := asset_path_required("config/game.json", "game config")
+	if path_err != nil do panic("Failed to load game config")
 
 	updated_at, time_err := os.last_write_time_by_name(path)
 	if time_err != nil {
@@ -315,7 +316,14 @@ game_config_load :: proc(gpa: runtime.Allocator) -> ^ConfigSnapshot {
 		panic("Failed to load game config")
 	}
 
-	snapshot.value = parse_game_config(config_allocator, raw, updated_at)
+	new_config, parse_error := parse_game_config(config_allocator, raw, updated_at)
+	if message, failed := parse_error.?; failed {
+		fmt.eprintln(message)
+		panic("Failed to load game config")
+	} else {
+		snapshot.value = new_config
+	}
+
 	return snapshot
 }
 
@@ -331,13 +339,12 @@ game_config_reload :: proc(
 	candidate: ^ConfigSnapshot,
 	status: ConfigReloadStatus,
 ) {
-	path := asset_path_required("config/game.json", "game config")
+	path, path_err := asset_path_required("config/game.json", "game config")
+	if path_err != nil do panic("Failed to load game config")
 
 	last_write_at, time_err := os.last_write_time_by_name(path)
 	if time_err != nil {
 		fmt.eprintfln("Failed to read config write time '%v': %v", path, os.error_string(time_err))
-		// TODO: Which is safer or has less friction?
-		// panic("Failed to load game config")
 		return nil, .Rejected
 	}
 
@@ -358,7 +365,14 @@ game_config_reload :: proc(
 	candidate = game_config_snapshot_create(gpa)
 	candidate_allocator := runtime.arena_allocator(&candidate.arena)
 
-	candidate.value = parse_game_config(candidate_allocator, raw, last_write_at)
+	new_config, parse_error := parse_game_config(candidate_allocator, raw, last_write_at)
+	if message, failed := parse_error.?; failed {
+		fmt.eprintln(message)
+		game_config_snapshot_destroy(candidate)
+		return nil, .Rejected
+	} else {
+		candidate.value = new_config
+	}
 
 	return candidate, .ReadyToReload
 }
@@ -367,8 +381,7 @@ game_config_reload :: proc(
 game_config_read_raw :: proc(path: string) -> (raw: GameConfigRaw, err: Maybe(string)) {
 	data, os_err := os.read_entire_file(path, context.temp_allocator)
 	if os_err != nil {
-		fmt.eprintfln("Failed to read required config '%v': %v", path, os.error_string(os_err))
-		panic("Failed to read required game config")
+		return {}, fmt.tprintf("Failed to read required config '%v': %v", path, os.error_string(os_err))
 	}
 
 	return game_config_decode_raw(data)
@@ -474,108 +487,123 @@ parse_game_config :: proc(
 	allocator: runtime.Allocator,
 	raw: GameConfigRaw,
 	updated_at: time.Time,
-) -> GameConfig {
-	item_pool := parse_item_pool_config(raw.item_pool)
-	modifiers := parse_modifiers_config(allocator, raw.modifiers)
-
-	return GameConfig {
-		background = parse_background_config(allocator, raw.background),
-		cards = parse_cards_config(raw.cards),
-		difficulties = parse_difficulties_config(allocator, raw.difficulties),
-		effects = raw.effects,
-		fonts = parse_fonts_config(allocator, raw.fonts),
-		hud = parse_hud_config(raw.hud),
-		item_pool = item_pool,
-		modifier_effects = parse_modifier_effects_config(raw.modifier_effects),
-		modifiers = modifiers,
-		player = parse_player_config(raw.player),
-		waves = parse_waves_config(allocator, raw.waves, modifiers),
-		items = parse_items_config(allocator, raw.items, item_pool.good_to_bad_ratio),
-		sounds = parse_sound_config(allocator, raw.sounds),
-		updated_at = updated_at,
-		attempted_at = updated_at,
+) -> (
+	config: GameConfig,
+	err: Maybe(string),
+) {
+	defer if err != nil {
+		game_config_destroy(&config)
 	}
+
+	config.cards = parse_cards_config(raw.cards) or_return
+	config.difficulties = parse_difficulties_config(allocator, raw.difficulties) or_return
+	config.effects = raw.effects
+	config.item_pool = parse_item_pool_config(raw.item_pool) or_return
+	config.hud = parse_hud_config(raw.hud) or_return
+	config.modifiers = parse_modifiers_config(allocator, raw.modifiers) or_return
+	config.modifier_effects = parse_modifier_effects_config(raw.modifier_effects) or_return
+	config.player = parse_player_config(raw.player) or_return
+	config.waves = parse_waves_config(allocator, raw.waves, config.modifiers) or_return
+
+	// These allocate something that needs to be cleaned up in case of failure
+	config.background, err = parse_background_config(allocator, raw.background)
+	if err != nil do return config, err
+	config.fonts, err = parse_fonts_config(allocator, raw.fonts)
+	if err != nil do return config, err
+	config.items, err = parse_items_config(allocator, raw.items)
+	if err != nil do return config, err
+	config.sounds, err = parse_sound_config(allocator, raw.sounds)
+	if err != nil do return config, err
+
+	config.updated_at = updated_at
+	config.attempted_at = updated_at
+	return config, nil
 }
 
 parse_background_config :: proc(
 	allocator: runtime.Allocator,
 	raw: []BackgroundPieceConfigRaw,
-) -> BackgroundConfig {
+) -> (
+	config: BackgroundConfig,
+	err: Maybe(string),
+) {
 	if len(raw) == 0 {
-		fmt.eprintln("Invalid background config: background must be non-empty")
-		panic("Invalid background config")
+		return {}, "Invalid background config: background must be non-empty"
 	}
 
 	pieces := make(map[BackgroundKind]BackgroundPieceConfig, allocator)
+	config.pieces = pieces
 	for piece in raw {
-		def := parse_background_piece_def(&pieces, piece)
+		kind, kind_ok := background_kind_from_string(piece.kind).?
+		if !kind_ok do return config, fmt.tprintf("Invalid background config: unknown piece kind '%v'", piece.kind)
+		if kind in pieces do return config, fmt.tprintf("Invalid background config: duplicate piece kind '%v'", piece.kind)
+		def, parse_err := parse_background_piece_def(piece)
+		if message, failed := parse_err.?; failed do return config, message
 		map_insert(&pieces, def.kind, def)
 	}
 
 	if !(.Floor in pieces) || !(.Wall in pieces) || !(.Window in pieces) {
-		fmt.eprintln("Invalid background config: floor, wall, and window pieces are required")
-		panic("Invalid background config")
+		return config, "Invalid background config: floor, wall, and window pieces are required"
 	}
 
-	return BackgroundConfig{pieces}
+	return BackgroundConfig{pieces}, nil
 }
 
 parse_background_piece_def :: proc(
-	pieces: ^map[BackgroundKind]BackgroundPieceConfig,
 	raw: BackgroundPieceConfigRaw,
-) -> BackgroundPieceConfig {
+) -> (
+	config: BackgroundPieceConfig,
+	err: Maybe(string),
+) {
 	kind, kind_ok := background_kind_from_string(raw.kind).?
 	if !kind_ok {
-		fmt.eprintfln("Invalid background config: unknown piece kind '%v'", raw.kind)
-		panic("Invalid background config")
+		return {}, fmt.tprintf("Invalid background config: unknown piece kind '%v'", raw.kind)
 	}
-	if kind in pieces {
-		fmt.eprintfln("Invalid background config: duplicate piece kind '%v'", raw.kind)
-		panic("Invalid background config")
-	}
-
+	sprite := load_texture_from(raw.sprite) or_return
 	return BackgroundPieceConfig {
-		kind = kind,
-		sprite = load_texture_from(raw.sprite),
-		width = raw.width,
-		height = raw.height,
-	}
+			kind = kind,
+			sprite = sprite,
+			width = raw.width,
+			height = raw.height,
+		},
+		nil
 }
 
-parse_cards_config :: proc(config: CardsConfigRaw) -> CardsConfig {
+parse_cards_config :: proc(config: CardsConfigRaw) -> (parsed: CardsConfig, err: Maybe(string)) {
+	sprite := load_texture_from(config.sprite) or_return
 	return CardsConfig {
-		gap = config.gap,
-		sprite = load_texture_from(config.sprite),
-		width = config.width,
-		height = config.height,
-		title_box = config.title_box,
-		description_box = config.description_box,
-	}
+			gap = config.gap,
+			sprite = sprite,
+			width = config.width,
+			height = config.height,
+			title_box = config.title_box,
+			description_box = config.description_box,
+		},
+		nil
 }
 
 parse_difficulties_config :: proc(
 	allocator: runtime.Allocator,
 	raw: []DifficultyConfigRaw,
-) -> [Difficulty]DifficultyConfig {
+) -> (
+	configs: [Difficulty]DifficultyConfig,
+	err: Maybe(string),
+) {
 	if len(raw) == 0 {
-		fmt.eprintln("Invalid difficulties config: difficulties must be non-empty")
-		panic("Invalid difficulties config")
+		return {}, "Invalid difficulties config: difficulties must be non-empty"
 	}
 
-	configs: [Difficulty]DifficultyConfig
+	local_configs: [Difficulty]DifficultyConfig
 	seen: [Difficulty]bool
 	for difficulty in raw {
-		parse_difficulty(allocator, &configs, &seen, difficulty)
+		parse_difficulty(allocator, &local_configs, &seen, difficulty) or_return
 	}
 
 	if !seen[.Easy] || !seen[.Medium] || !seen[.Hard] {
-		fmt.eprintln(
-			"Invalid difficulties config: easy, medium, and hard difficulties are required",
-		)
-		panic("Invalid difficulties config")
+		return {}, "Invalid difficulties config: easy, medium, and hard difficulties are required"
 	}
 
-	return configs
+	return local_configs, nil
 }
 
 parse_difficulty :: proc(
@@ -583,15 +611,19 @@ parse_difficulty :: proc(
 	configs: ^[Difficulty]DifficultyConfig,
 	seen: ^[Difficulty]bool,
 	difficulty: DifficultyConfigRaw,
-) {
+) -> Maybe(string) {
 	kind, kind_ok := difficulty_from_string(difficulty.kind).?
 	if !kind_ok {
-		fmt.eprintfln("Invalid difficulty config: unknown difficulty kind '%v'", difficulty.kind)
-		panic("Invalid difficulty config")
+		return fmt.tprintf(
+			"Invalid difficulty config: unknown difficulty kind '%v'",
+			difficulty.kind,
+		)
 	}
 	if seen[kind] {
-		fmt.eprintfln("Invalid difficulty config: duplicate difficulty kind '%v'", difficulty.kind)
-		panic("Invalid difficulty config")
+		return fmt.tprintf(
+			"Invalid difficulty config: duplicate difficulty kind '%v'",
+			difficulty.kind,
+		)
 	}
 
 	label := strings.clone(difficulty.label, allocator)
@@ -604,170 +636,201 @@ parse_difficulty :: proc(
 		lives          = difficulty.lives,
 	}
 	seen[kind] = true
+	return nil
 }
 
-parse_fonts_config :: proc(allocator: runtime.Allocator, raw: []FontConfigRaw) -> FontsConfig {
+parse_fonts_config :: proc(
+	allocator: runtime.Allocator,
+	raw: []FontConfigRaw,
+) -> (
+	config: FontsConfig,
+	err: Maybe(string),
+) {
 	if len(raw) == 0 {
-		fmt.eprintln("Invalid fonts config: fonts must be non-empty")
-		panic("Invalid fonts config")
+		return {}, "Invalid fonts config: fonts must be non-empty"
 	}
 
 	by_kind := make(map[FontKind]FontConfig, allocator)
+	config.by_kind = by_kind
 	for font in raw {
-		def := parse_font_def(&by_kind, font)
+		kind, kind_ok := font_kind_from_string(font.kind).?
+		if !kind_ok do return config, fmt.tprintf("Invalid fonts config: unknown font kind '%v'", font.kind)
+		if kind in by_kind do return config, fmt.tprintf("Invalid fonts config: duplicate font kind '%v'", font.kind)
+		def, parse_err := parse_font_def(allocator, font)
+		if message, failed := parse_err.?; failed do return config, message
 		map_insert(&by_kind, def.kind, def)
 	}
 
 	if !(.H1 in by_kind) || !(.P in by_kind) {
-		fmt.eprintln("Invalid fonts config: h1 and p fonts are required")
-		panic("Invalid fonts config")
+		return config, "Invalid fonts config: h1 and p fonts are required"
 	}
 
-	return FontsConfig{by_kind = by_kind}
+	return FontsConfig{by_kind = by_kind}, nil
 }
 
-parse_font_def :: proc(by_kind: ^map[FontKind]FontConfig, raw: FontConfigRaw) -> FontConfig {
+parse_font_def :: proc(
+	allocator: runtime.Allocator,
+	raw: FontConfigRaw,
+) -> (
+	config: FontConfig,
+	err: Maybe(string),
+) {
 	kind, kind_ok := font_kind_from_string(raw.kind).?
 	if !kind_ok {
-		fmt.eprintfln("Invalid fonts config: unknown font kind '%v'", raw.kind)
-		panic("Invalid fonts config")
-	}
-	if kind in by_kind {
-		fmt.eprintfln("Invalid fonts config: duplicate font kind '%v'", raw.kind)
-		panic("Invalid fonts config")
+		return {}, fmt.tprintf("Invalid fonts config: unknown font kind '%v'", raw.kind)
 	}
 
-	return FontConfig{kind = kind, font = load_font_from(raw.font, raw.size), size = raw.size}
+	font := load_font_from(raw.font, raw.size) or_return
+	return FontConfig{kind = kind, font = font, size = raw.size}, nil
 }
 
-parse_hud_config :: proc(raw: HudConfigRaw) -> HudConfig {
+parse_hud_config :: proc(raw: HudConfigRaw) -> (config: HudConfig, err: Maybe(string)) {
+	sprite := load_texture_from(raw.lives_sprite) or_return
 	return HudConfig {
-		margin = raw.margin,
-		lives_sprite = load_texture_from(raw.lives_sprite),
-		lives_gap = raw.lives_gap,
-		lives_width = raw.lives_width,
-		lives_height = raw.lives_height,
-	}
+			margin = raw.margin,
+			lives_sprite = sprite,
+			lives_gap = raw.lives_gap,
+			lives_width = raw.lives_width,
+			lives_height = raw.lives_height,
+		},
+		nil
 }
 
-parse_item_pool_config :: proc(config: ItemPoolConfig) -> ItemPoolConfig {
-	if config.good_to_bad_ratio < 0 || config.good_to_bad_ratio > 1 {
-		fmt.eprintfln(
+parse_item_pool_config :: proc(
+	raw: ItemPoolConfig,
+) -> (
+	config: ItemPoolConfig,
+	err: Maybe(string),
+) {
+	if raw.good_to_bad_ratio < 0 || raw.good_to_bad_ratio > 1 {
+		return raw, fmt.tprintf(
 			"Invalid item pool config: good_to_bad_ratio must be between 0 and 1, got %v",
-			config.good_to_bad_ratio,
+			raw.good_to_bad_ratio,
 		)
-		panic("Invalid item pool config")
 	}
-	return config
+	return raw, nil
 }
 
-parse_modifier_effects_config :: proc(raw: ModifierEffectsConfigRaw) -> ModifierEffectsConfig {
+parse_modifier_effects_config :: proc(
+	raw: ModifierEffectsConfigRaw,
+) -> (
+	config: ModifierEffectsConfig,
+	err: Maybe(string),
+) {
 	return ModifierEffectsConfig {
-		prestige_preference_item = parse_modifier_effect_item(
-			raw.prestige_preference_item,
-			"prestige_preference_item",
-		),
-		tech_stack_preference_item = parse_modifier_effect_item(
-			raw.tech_stack_preference_item,
-			"tech_stack_preference_item",
-		),
-		compensation_preference_item = parse_modifier_effect_item(
-			raw.compensation_preference_item,
-			"compensation_preference_item",
-		),
-		remote_work_preference_item = parse_modifier_effect_item(
-			raw.remote_work_preference_item,
-			"remote_work_preference_item",
-		),
-		add_pet_project_catch_number = raw.add_pet_project_catch_number,
-		ask_for_referral_weight_multiplier = raw.ask_for_referral_weight_multiplier,
-		file_unemployment_lives_delta = raw.file_unemployment_lives_delta,
-		give_conference_talk_margin_multiplier = raw.give_conference_talk_margin_multiplier,
-		give_conference_talk_magnet_multiplier = raw.give_conference_talk_magnet_multiplier,
-		hiring_freeze_item_speed_multiplier = raw.hiring_freeze_item_speed_multiplier,
-		burnout_item_speed_multiplier = raw.burnout_item_speed_multiplier,
-		burnout_score_base_multiplier = raw.burnout_score_base_multiplier,
-		leet_code_ratio_multiplier = raw.leet_code_ratio_multiplier,
-		lower_quality_bar_ratio_multiplier = raw.lower_quality_bar_ratio_multiplier,
-		lower_quality_bar_lives_delta = raw.lower_quality_bar_lives_delta,
-		tighten_cv_ratio_multiplier = raw.tighten_cv_ratio_multiplier,
-		tighten_cv_score_base_multiplier = raw.tighten_cv_score_base_multiplier,
-		spray_and_pray_ratio_multiplier = raw.spray_and_pray_ratio_multiplier,
-		spray_and_pray_score_base_divisor = raw.spray_and_pray_score_base_divisor,
-		blind_application_hidden_ratio = raw.blind_application_hidden_ratio,
-		give_up_timer = raw.give_up_timer,
-		recruiter_spawn_rate = raw.recruiter_spawn_rate,
-		recruiter_spawn_timer = raw.recruiter_spawn_timer,
-	}
+			prestige_preference_item = parse_modifier_effect_item(
+				raw.prestige_preference_item,
+				"prestige_preference_item",
+			) or_return,
+			tech_stack_preference_item = parse_modifier_effect_item(
+				raw.tech_stack_preference_item,
+				"tech_stack_preference_item",
+			) or_return,
+			compensation_preference_item = parse_modifier_effect_item(
+				raw.compensation_preference_item,
+				"compensation_preference_item",
+			) or_return,
+			remote_work_preference_item = parse_modifier_effect_item(
+				raw.remote_work_preference_item,
+				"remote_work_preference_item",
+			) or_return,
+			add_pet_project_catch_number = raw.add_pet_project_catch_number,
+			ask_for_referral_weight_multiplier = raw.ask_for_referral_weight_multiplier,
+			file_unemployment_lives_delta = raw.file_unemployment_lives_delta,
+			give_conference_talk_margin_multiplier = raw.give_conference_talk_margin_multiplier,
+			give_conference_talk_magnet_multiplier = raw.give_conference_talk_magnet_multiplier,
+			hiring_freeze_item_speed_multiplier = raw.hiring_freeze_item_speed_multiplier,
+			burnout_item_speed_multiplier = raw.burnout_item_speed_multiplier,
+			burnout_score_base_multiplier = raw.burnout_score_base_multiplier,
+			leet_code_ratio_multiplier = raw.leet_code_ratio_multiplier,
+			lower_quality_bar_ratio_multiplier = raw.lower_quality_bar_ratio_multiplier,
+			lower_quality_bar_lives_delta = raw.lower_quality_bar_lives_delta,
+			tighten_cv_ratio_multiplier = raw.tighten_cv_ratio_multiplier,
+			tighten_cv_score_base_multiplier = raw.tighten_cv_score_base_multiplier,
+			spray_and_pray_ratio_multiplier = raw.spray_and_pray_ratio_multiplier,
+			spray_and_pray_score_base_divisor = raw.spray_and_pray_score_base_divisor,
+			blind_application_hidden_ratio = raw.blind_application_hidden_ratio,
+			give_up_timer = raw.give_up_timer,
+			recruiter_spawn_rate = raw.recruiter_spawn_rate,
+			recruiter_spawn_timer = raw.recruiter_spawn_timer,
+		},
+		nil
 }
 
-parse_modifier_effect_item :: proc(raw: string, field: string) -> ItemKind {
+parse_modifier_effect_item :: proc(raw: string, field: string) -> (ItemKind, Maybe(string)) {
 	kind, ok := kind_from_string(raw).?
 	if !ok {
-		fmt.eprintfln(
+		return .Neutral, fmt.tprintf(
 			"Invalid modifier effects config: unknown item kind '%v' for '%v'",
 			raw,
 			field,
 		)
-		panic("Invalid modifier effects config")
 	}
-	return kind
+	return kind, nil
 }
 
 parse_modifiers_config :: proc(
 	allocator: runtime.Allocator,
 	raw: []ModifierConfigRaw,
-) -> ModifiersConfig {
+) -> (
+	config: ModifiersConfig,
+	err: Maybe(string),
+) {
 	if len(raw) == 0 {
-		fmt.eprintln("Invalid modifiers config: modifiers must be non-empty")
-		panic("Invalid modifiers config")
+		return {}, "Invalid modifiers config: modifiers must be non-empty"
 	}
 
 	by_kind := make(map[ModifierKind]ModifierConfig, allocator)
 	for modifier in raw {
-		def := parse_modifier_def(allocator, &by_kind, modifier)
+		def := parse_modifier_def(allocator, modifier) or_return
+		if def.kind in by_kind do return {}, fmt.tprintf("Invalid modifier config: duplicate modifier kind '%v'", modifier.kind)
 		map_insert(&by_kind, def.kind, def)
 	}
 
-	return ModifiersConfig{by_kind = by_kind}
+	return ModifiersConfig{by_kind = by_kind}, nil
 }
 
 parse_modifier_def :: proc(
 	allocator: runtime.Allocator,
-	by_kind: ^map[ModifierKind]ModifierConfig,
 	raw: ModifierConfigRaw,
-) -> ModifierConfig {
+) -> (
+	config: ModifierConfig,
+	err: Maybe(string),
+) {
 	kind, kind_ok := modifier_kind_from_string(raw.kind).?
 	if !kind_ok {
-		fmt.eprintfln("Invalid modifier config: unknown modifier kind '%v'", raw.kind)
-		panic("Invalid modifier config")
-	}
-	if kind in by_kind {
-		fmt.eprintfln("Invalid modifier config: duplicate modifier kind '%v'", raw.kind)
-		panic("Invalid modifier config")
+		return {}, fmt.tprintf("Invalid modifier config: unknown modifier kind '%v'", raw.kind)
 	}
 
 	return ModifierConfig {
-		kind = kind,
-		title = strings.clone(raw.title, allocator),
-		description = strings.clone(raw.description, allocator),
-	}
+			kind = kind,
+			title = strings.clone(raw.title, allocator),
+			description = strings.clone(raw.description, allocator),
+		},
+		nil
 }
 
 // Fill out item catalog so we don't have to recalculate the weights for each random generation
 parse_items_config :: proc(
 	allocator: runtime.Allocator,
 	raw: []ItemConfigRaw,
-	good_to_bad_ratio: f32,
-) -> map[ItemKind]ItemConfig {
+) -> (
+	config: map[ItemKind]ItemConfig,
+	err: Maybe(string),
+) {
+
 	if len(raw) == 0 {
-		fmt.eprintln("Invalid items config: items must be non-empty")
-		panic("Invalid items config")
+		return nil, "Invalid items config: items must be non-empty"
 	}
 
 	by_kind := make(map[ItemKind]ItemConfig, allocator)
+	config = by_kind
 	for item in raw {
-		def := parse_item_def(&by_kind, item)
+		kind, kind_ok := kind_from_string(item.kind).?
+		if !kind_ok do return config, fmt.tprintf("Invalid item config: unknown item kind '%v'", item.kind)
+		if kind in by_kind do return config, fmt.tprintf("Invalid item config: duplicate item kind '%v'", item.kind)
+		def, parse_err := parse_item_def(item)
+		if message, failed := parse_err.?; failed do return config, message
 		if item.is_good {
 			if item.points > 0 {
 				def.effect = GoodItemCaught {
@@ -782,176 +845,187 @@ parse_items_config :: proc(
 		map_insert(&by_kind, def.kind, def)
 	}
 
-	return by_kind
+	return by_kind, nil
 }
 
 // Note: doesn't set the item effect
-parse_item_def :: proc(by_kind: ^map[ItemKind]ItemConfig, raw: ItemConfigRaw) -> ItemConfig {
+parse_item_def :: proc(raw: ItemConfigRaw) -> (config: ItemConfig, err: Maybe(string)) {
 	kind, kind_ok := kind_from_string(raw.kind).?
 	if !kind_ok {
-		fmt.eprintfln("Invalid item config: unknown item kind '%v'", raw.kind)
-		panic("Invalid item config")
-	}
-	if kind in by_kind {
-		fmt.eprintfln("Invalid item config: duplicate item kind '%v'", raw.kind)
-		panic("Invalid item config")
+		return {}, fmt.tprintf("Invalid item config: unknown item kind '%v'", raw.kind)
 	}
 
 	shape, shape_ok := shape_from_string(raw.shape).?
 	if !shape_ok {
-		fmt.eprintfln("Invalid item config: unknown item shape '%v'", raw.shape)
-		panic("Invalid item config")
+		return {}, fmt.tprintf("Invalid item config: unknown item shape '%v'", raw.shape)
 	}
 
+	sprite := load_texture_from(raw.sprite) or_return
 	return ItemConfig {
-		kind = kind,
-		sprite = load_texture_from(raw.sprite),
-		shape = shape,
-		width = raw.width,
-		height = raw.height,
-		weight = raw.weight,
-	}
+			kind = kind,
+			sprite = sprite,
+			shape = shape,
+			width = raw.width,
+			height = raw.height,
+			weight = raw.weight,
+		},
+		nil
 }
 
-parse_player_config :: proc(config: PlayerConfigRaw) -> PlayerConfig {
+parse_player_config :: proc(
+	config: PlayerConfigRaw,
+) -> (
+	parsed: PlayerConfig,
+	err: Maybe(string),
+) {
+	sprite := load_texture_from(config.sprite) or_return
 	return PlayerConfig {
-		sprite = load_texture_from(config.sprite),
-		width = config.width,
-		height = config.height,
-		speed = config.speed,
-		floor_offset = config.floor_offset,
-		squash_scale_x = config.squash_scale_x,
-		squash_scale_y = config.squash_scale_y,
-		squash_time = config.squash_time,
-	}
+			sprite = sprite,
+			width = config.width,
+			height = config.height,
+			speed = config.speed,
+			floor_offset = config.floor_offset,
+			squash_scale_x = config.squash_scale_x,
+			squash_scale_y = config.squash_scale_y,
+			squash_time = config.squash_time,
+		},
+		nil
 }
 
-parse_sound_config :: proc(allocator: runtime.Allocator, raw: []SoundConfigRaw) -> SoundsConfig {
+parse_sound_config :: proc(
+	allocator: runtime.Allocator,
+	raw: []SoundConfigRaw,
+) -> (
+	config: SoundsConfig,
+	err: Maybe(string),
+) {
 	if len(raw) == 0 {
-		fmt.eprintln("Invalid sounds config: sounds must be non-empty")
-		panic("Invalid sounds config")
+		return {}, "Invalid sounds config: sounds must be non-empty"
 	}
 
 	by_kind := make(map[SoundKind]k2.Sound, allocator)
+	config.by_kind = by_kind
 	for sound in raw {
 		kind, kind_ok := sound_kind_from_string(sound.kind).?
 		if !kind_ok {
-			fmt.eprintfln("Invalid sounds config: unknown sound kind '%v'", sound.kind)
-			panic("Invalid sounds config")
+			return config, fmt.tprintf(
+				"Invalid sounds config: unknown sound kind '%v'",
+				sound.kind,
+			)
 		}
 		if kind in by_kind {
-			fmt.eprintfln("Invalid sounds config: duplicate sound kind '%v'", sound.kind)
-			panic("Invalid sounds config")
+			return config, fmt.tprintf(
+				"Invalid sounds config: duplicate sound kind '%v'",
+				sound.kind,
+			)
 		}
 
-		map_insert(&by_kind, kind, load_sound_from(sound.sound))
+		sound_value := load_sound_from(sound.sound) or_return
+		map_insert(&by_kind, kind, sound_value)
 	}
 
 	if !(.CatchGood in by_kind) ||
 	   !(.CatchBad in by_kind) ||
+	   !(.CatchDull in by_kind) ||
 	   !(.GameOver in by_kind) ||
 	   !(.WaveNext in by_kind) {
-		fmt.eprintln("Invalid sounds config: all the sounds are required")
-		panic("Invalid sounds config")
+		return config,
+			"Invalid sounds config: catch-good, catch-bad, catch-dull, game-over, and wave-next are required"
 	}
 
-	return SoundsConfig{by_kind = by_kind}
+	return SoundsConfig{by_kind = by_kind}, nil
 }
 
 parse_waves_config :: proc(
 	allocator: runtime.Allocator,
 	raw: []WaveConfigRaw,
 	modifiers: ModifiersConfig,
-) -> []WaveConfig {
+) -> (
+	config: []WaveConfig,
+	err: Maybe(string),
+) {
 	if len(raw) == 0 {
-		fmt.eprintln("Invalid waves config: waves must be non-empty")
-		panic("Invalid waves config")
+		return nil, "Invalid waves config: waves must be non-empty"
 	}
 
-	config := make([]WaveConfig, len(raw), allocator)
+	local_config := make([]WaveConfig, len(raw), allocator)
 	for wave, wave_index in raw {
 		parsed_modifiers := make([]ModifierKind, len(wave.modifiers), allocator)
 		for modifier, modifier_index in wave.modifiers {
 			kind, kind_ok := modifier_kind_from_string(modifier).?
 			if !kind_ok {
-				fmt.eprintfln(
+				return nil, fmt.tprintf(
 					"Invalid waves config: wave %v uses unknown modifier kind '%v'",
 					wave_index,
 					modifier,
 				)
-				panic("Invalid waves config")
 			}
 			if !(kind in modifiers.by_kind) {
-				fmt.eprintfln(
+				return nil, fmt.tprintf(
 					"Invalid waves config: wave %v references missing modifier '%v'",
 					wave_index,
 					modifier,
 				)
-				panic("Invalid waves config")
 			}
 			parsed_modifiers[modifier_index] = kind
 		}
 
 		if len(parsed_modifiers) < 3 {
-			fmt.eprintfln(
+			return nil, fmt.tprintf(
 				"Invalid waves config: wave %v must have at least 3 modifiers",
 				wave_index,
 			)
-			panic("Invalid waves config")
 		}
 
-		config[wave_index] = WaveConfig {
+		local_config[wave_index] = WaveConfig {
 			spawn_multiplier = wave.spawn_multiplier,
 			speed_multiplier = wave.speed_multiplier,
 			duration         = wave.duration,
 			modifiers        = parsed_modifiers,
 		}
 	}
-	return config
+	return local_config, nil
 }
 
-load_font_from :: proc(font_name: string, size: int) -> k2.Font {
+load_font_from :: proc(font_name: string, size: int) -> (font: k2.Font, err: Maybe(string)) {
 	// TODO: This won't work from the bin (or any non root dir)
 	path := asset_path_required(
 		strings.concatenate({"fonts/", font_name, ".ttf"}, context.temp_allocator),
 		font_name,
-	)
+	) or_return
 
 	font_codepoints := utf8.string_to_runes(
 		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890-., :'",
 		context.temp_allocator,
 	)
 
-	return k2.load_static_font_from_file(path, f32(size), font_codepoints)
+	font = k2.load_static_font_from_file(path, f32(size), font_codepoints)
+	if font == k2.FONT_NONE do return {}, fmt.tprintf("Failed to load font '%v'", path)
+	return font, nil
 }
 
-load_sound_from :: proc(sound_name: string) -> k2.Sound {
+load_sound_from :: proc(sound_name: string) -> (sound: k2.Sound, err: Maybe(string)) {
 	// TODO: This won't work from the bin (or any non root dir)
 	path := asset_path_required(
 		strings.concatenate({"sounds/", sound_name, ".wav"}, context.temp_allocator),
 		sound_name,
-	)
-	return k2.load_sound_from_file(path)
+	) or_return
+	sound = k2.load_sound_from_file(path)
+	if sound == k2.SOUND_NONE do return {}, fmt.tprintf("Failed to load sound '%v'", path)
+	return sound, nil
 }
 
-load_texture_from :: proc(sprite_name: string) -> k2.Texture {
+load_texture_from :: proc(sprite_name: string) -> (texture: k2.Texture, err: Maybe(string)) {
 	// TODO: This won't work from the bin (or any non root dir)
 	path := asset_path_required(
 		strings.concatenate({"sprites/", sprite_name, ".png"}, context.temp_allocator),
 		sprite_name,
-	)
-	texture := k2.load_texture_from_file(path)
+	) or_return
+	texture = k2.load_texture_from_file(path)
 	if texture.width <= 0 || texture.height <= 0 {
-		fmt.eprintfln(
-			"Invalid texture config: failed to load sprite '%v' from %v (w: %v, h: %v)",
-			sprite_name,
-			path,
-			texture.width,
-			texture.height,
-		)
-		panic("Invalid texture config")
+		return {}, fmt.tprintf("Invalid texture config: failed to load sprite '%v' from %v (w: %v, h: %v)", sprite_name, path, texture.width, texture.height)
 	}
-	return texture
+	return texture, nil
 }
 
 kind_from_string :: proc(raw: string) -> Maybe(ItemKind) {
@@ -1088,39 +1162,54 @@ font_kind_from_string :: proc(raw: string) -> Maybe(FontKind) {
 	return nil
 }
 
-asset_path_required :: proc(relative: string, label: string) -> string {
-	path, err := filepath.join({"assets", relative}, context.temp_allocator)
-	if err != nil {
-		fmt.eprintln("Failed to allocate asset path")
-		panic("Failed to allocate asset path")
+asset_path_required :: proc(
+	relative: string,
+	label: string,
+) -> (
+	path: string,
+	err: Maybe(string),
+) {
+	joined, join_err := filepath.join({"assets", relative}, context.temp_allocator)
+	if join_err != nil {
+		return "", "Failed to allocate asset path"
 	}
+	path = joined
 
-	if os.is_file(path) do return path
+	if os.is_file(path) do return path, nil
 
-	fmt.eprintfln("Failed to find asset '%v': %v", label, path)
-	panic("Asset not found")
+	return "", fmt.tprintf("Failed to find asset '%v': %v", label, path)
 }
 
-// TODO: This is fine for now because we recreate all
-game_config_destroy :: proc(game_config: ^GameConfig) {
-	for _, font in game_config.fonts.by_kind {
-		k2.destroy_font(font.font)
-	}
-
-	k2.destroy_texture(game_config.cards.sprite)
-	k2.destroy_texture(game_config.player.sprite)
-
-	for _, item in game_config.items {
-		k2.destroy_texture(item.sprite)
-	}
-
-	for _, piece in game_config.background.pieces {
+destroy_background_config :: proc(config: ^BackgroundConfig) {
+	for _, piece in config.pieces {
 		k2.destroy_texture(piece.sprite)
 	}
+}
 
-	k2.destroy_texture(game_config.hud.lives_sprite)
+destroy_fonts_config :: proc(config: ^FontsConfig) {
+	for _, font in config.by_kind {
+		k2.destroy_font(font.font)
+	}
+}
 
-	for _, sound in game_config.sounds.by_kind {
+destroy_item_configs :: proc(config: map[ItemKind]ItemConfig) {
+	for _, item in config {
+		k2.destroy_texture(item.sprite)
+	}
+}
+
+destroy_sounds_config :: proc(config: ^SoundsConfig) {
+	for _, sound in config.by_kind {
 		k2.destroy_sound(sound)
 	}
+}
+
+game_config_destroy :: proc(game_config: ^GameConfig) {
+	destroy_fonts_config(&game_config.fonts)
+	k2.destroy_texture(game_config.cards.sprite)
+	k2.destroy_texture(game_config.player.sprite)
+	destroy_item_configs(game_config.items)
+	destroy_background_config(&game_config.background)
+	k2.destroy_texture(game_config.hud.lives_sprite)
+	destroy_sounds_config(&game_config.sounds)
 }
