@@ -62,6 +62,19 @@ effects_reset :: proc(effects: Effects) {
 	}
 }
 
+effects_clear :: proc(effects: ^Effects) {
+	clear(&effects.item_flashes)
+
+	for &particle in effects.particle_pool {
+		particle = {}
+	}
+
+	effects^ = Effects {
+		item_flashes  = effects.item_flashes,
+		particle_pool = effects.particle_pool,
+	}
+}
+
 effects_draw :: proc(config: GameConfig, rules: GameRules, effects: Effects) {
 	flash_draw(effects)
 	for text in effects.floating_texts {

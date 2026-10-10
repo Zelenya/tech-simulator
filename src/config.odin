@@ -501,7 +501,6 @@ parse_game_config :: proc(
 	config.item_pool = parse_item_pool_config(raw.item_pool) or_return
 	config.hud = parse_hud_config(raw.hud) or_return
 	config.modifiers = parse_modifiers_config(allocator, raw.modifiers) or_return
-	config.modifier_effects = parse_modifier_effects_config(raw.modifier_effects) or_return
 	config.player = parse_player_config(raw.player) or_return
 	config.waves = parse_waves_config(allocator, raw.waves, config.modifiers) or_return
 
@@ -514,6 +513,11 @@ parse_game_config :: proc(
 	if err != nil do return config, err
 	config.sounds, err = parse_sound_config(allocator, raw.sounds)
 	if err != nil do return config, err
+
+	config.modifier_effects = parse_modifier_effects_config(
+		raw.modifier_effects,
+		config.items,
+	) or_return
 
 	config.updated_at = updated_at
 	config.attempted_at = updated_at
@@ -713,26 +717,30 @@ parse_item_pool_config :: proc(
 
 parse_modifier_effects_config :: proc(
 	raw: ModifierEffectsConfigRaw,
+	items: map[ItemKind]ItemConfig,
 ) -> (
 	config: ModifierEffectsConfig,
 	err: Maybe(string),
 ) {
+	if .Neutral not_in items {
+		return {}, "Neutral item is missing, but it's required by modifier effects"
+	}
 	return ModifierEffectsConfig {
 			prestige_preference_item = parse_modifier_effect_item(
+				items,
 				raw.prestige_preference_item,
-				"prestige_preference_item",
 			) or_return,
 			tech_stack_preference_item = parse_modifier_effect_item(
+				items,
 				raw.tech_stack_preference_item,
-				"tech_stack_preference_item",
 			) or_return,
 			compensation_preference_item = parse_modifier_effect_item(
+				items,
 				raw.compensation_preference_item,
-				"compensation_preference_item",
 			) or_return,
 			remote_work_preference_item = parse_modifier_effect_item(
+				items,
 				raw.remote_work_preference_item,
-				"remote_work_preference_item",
 			) or_return,
 			add_pet_project_catch_number = raw.add_pet_project_catch_number,
 			ask_for_referral_weight_multiplier = raw.ask_for_referral_weight_multiplier,
@@ -757,13 +765,24 @@ parse_modifier_effects_config :: proc(
 		nil
 }
 
-parse_modifier_effect_item :: proc(raw: string, field: string) -> (ItemKind, Maybe(string)) {
+parse_modifier_effect_item :: proc(
+	items: map[ItemKind]ItemConfig,
+	raw: string,
+) -> (
+	ItemKind,
+	Maybe(string),
+) {
 	kind, ok := kind_from_string(raw).?
 	if !ok {
 		return .Neutral, fmt.tprintf(
-			"Invalid modifier effects config: unknown item kind '%v' for '%v'",
+			"Invalid modifier effect item config: unknown item kind '%v'",
 			raw,
-			field,
+		)
+	}
+	if kind not_in items {
+		return .Neutral, fmt.tprintf(
+			"Invalid modifier effect item config: item '%v' isn't defined",
+			raw,
 		)
 	}
 	return kind, nil

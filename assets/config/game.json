@@ -121,7 +121,7 @@
     "ask_for_referral_weight_multiplier": 3,
     "file_unemployment_lives_delta": 1,
     "give_conference_talk_margin_multiplier": 0.2,
-    "give_conference_talk_magnet_multiplier": 1.2,
+    "give_conference_talk_magnet_multiplier": 1.01,
     "hiring_freeze_item_speed_multiplier": 0.6,
     "burnout_item_speed_multiplier": 1.5,
     "burnout_score_base_multiplier": 3,

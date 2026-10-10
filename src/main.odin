@@ -1,9 +1,10 @@
 package game
 
 import k2 "../karl2d"
+import "core:fmt"
 
 main :: proc() {
-	k2.init(WINDOW_WIDTH, WINDOW_HEIGHT, "Greetings!")
+	k2.init(WINDOW_WIDTH, WINDOW_HEIGHT, "Don't forget to drink some water")
 
 	memory: AppMemory
 	memory_init(&memory)
@@ -22,6 +23,41 @@ main :: proc() {
 
 		// Hot config reload:
 		config_candidate, config_status := game_config_reload(current_config)
+		// Validate the config (if reloaded)
+		if config_status == .ReadyToReload {
+			_, is_modifier_menu := wave_menu.(WaveMenu(ModifierKind))
+			choosing_modifier := game_state == .WaveMenu && is_modifier_menu
+			if game_state == .Playing || game_state == .Pause || choosing_modifier {
+				required_waves := max(session.current_wave + 1, len(session.modifier_picks) + 1)
+				if choosing_modifier do required_waves += 1 // We are advancing to the next wave
+
+				issue, rejected := game_reload_check(
+					config_candidate.value,
+					&session,
+					required_waves,
+				).?
+
+				if rejected {
+					switch reason in issue {
+					case ReloadMissingWaves:
+						fmt.eprintfln(
+							"Config reload rejected: need %v waves, got %v",
+							reason.required,
+							reason.available,
+						)
+					case ReloadMissingItem:
+						fmt.eprintfln(
+							"Config reload rejected: pending spawn requires item %v",
+							reason.kind,
+						)
+					}
+					game_config_snapshot_destroy(config_candidate)
+					config_candidate = nil
+					config_status = .Rejected
+				}
+			}
+		}
+		// Apply the config (if reloaded)
 		if config_status == .ReadyToReload {
 			previous := current_config
 			current_config = config_candidate
@@ -33,6 +69,7 @@ main :: proc() {
 					wave_menu = wave_menu_init(config.cards, config.difficulties)
 				case WaveMenu(ModifierKind):
 					game_reload(config, &session)
+					// Note that this reshuffles the cards
 					wave_menu = wave_modifier_init(config, session)
 				}
 			case .Playing, .Pause:

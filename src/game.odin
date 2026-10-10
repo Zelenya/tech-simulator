@@ -303,14 +303,48 @@ game_process_modifier_actions :: proc(config: GameConfig, session: ^Session, scr
 	}
 }
 
-// TODO: Replay the modifier picks?
-// TODO: Otherwise we have rules in half-reloaded state
 game_reload :: proc(config: GameConfig, session: ^Session) {
-	item_catalog_reset_from_config(config.items, config.item_pool, &session.item_catalog)
+	game_session_rebuild(config, session)
 	item_pool_reset_active(session.rules, &session.item_pool)
 	session.player = player_init(config.player)
-	// in case we remove a wave:
-	session.current_wave = min(session.current_wave, len(config.waves) - 1)
+	effects_clear(&session.effects)
+}
+
+ReloadMissingWaves :: struct {
+	required:  int,
+	available: int,
+}
+
+ReloadMissingItem :: struct {
+	kind: ItemKind,
+}
+
+GameReloadIssue :: union {
+	ReloadMissingWaves,
+	ReloadMissingItem,
+}
+
+game_reload_check :: proc(
+	config: GameConfig,
+	session: ^Session,
+	required_waves: int,
+) -> Maybe(GameReloadIssue) {
+	if len(config.waves) < required_waves {
+		return ReloadMissingWaves{required = required_waves, available = len(config.waves)}
+	}
+
+	for i in 0 ..< queue.len(session.modifiers.pending) {
+		switch action in queue.get(&session.modifiers.pending, i) {
+		case SpawnItemAction:
+			kind, explicit_kind := action.item_kind.?
+			if explicit_kind && kind not_in config.items {
+				return ReloadMissingItem{kind = kind}
+			}
+		case ChangeLivesAction:
+		}
+	}
+
+	return nil
 }
 
 game_draw :: proc(config: GameConfig, session: Session) {
