@@ -26,7 +26,7 @@ game_rules_rebuild_replays_rules_without_compounding :: proc(t: ^testing.T) {
 
 	// 100 × 2 × 0.5 × 3 × 2 = 600
 	testing.expect_value(t, first.item_speed, f32(600))
-	testing.expect_value(t, first.score_base, u32(3))
+	testing.expect_value(t, first.score_base, f32(3))
 	testing.expect_value(t, first.item_movement, game.ItemMovement.MixedSpeed)
 
 	// Rebuilding from the same inputs, is "idempotent" (doesn't compound effects)

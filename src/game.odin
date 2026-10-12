@@ -4,6 +4,7 @@ import k2 "../karl2d"
 import "base:runtime"
 import "core:container/queue"
 import "core:fmt"
+import "core:math"
 
 GameState :: enum {
 	WaveMenu,
@@ -16,7 +17,7 @@ GameRules :: struct {
 	good_catch_magnet:              f32,
 	good_catch_margin:              f32,
 	item_speed:                     f32,
-	score_base:                     u32,
+	score_base:                     f32,
 	item_hidden_until_screen_ratio: Maybe(f32),
 	item_preference:                Maybe(ItemKind),
 	item_movement:                  ItemMovement,
@@ -31,8 +32,8 @@ GameRules :: struct {
 }
 
 ItemOutcomeSummary :: struct {
-	score_delta:      u32,
-	score_multiplier: u32,
+	score_delta:      f32,
+	score_multiplier: f32,
 	combo_after:      u32,
 	lives_delta:      i8,
 }
@@ -71,10 +72,11 @@ game_rules_build :: proc(
 	return rules
 }
 
-get_multiplier :: proc(rules: GameRules, combo: u32, item_kind: ItemKind) -> u32 {
+get_multiplier :: proc(rules: GameRules, combo: u32, item_kind: ItemKind) -> f32 {
 	// TODO: Move this to config and/or play with formulas
-	item_multiplier: u32 = 2 if rules.item_preference == item_kind else 1
-	return rules.score_base * item_multiplier * get_combo_multiplier(combo)
+	item_multiplier: f32 = 2 if rules.item_preference == item_kind else 1
+	multiplier: f32 = math.round(item_multiplier * f32(get_combo_multiplier(combo)) * 10.0) / 10
+	return rules.score_base * multiplier
 }
 
 // TODO: Move this to config and/or play with formulas
@@ -133,7 +135,6 @@ game_session_rebuild :: proc(config: GameConfig, session: ^Session) {
 	item_catalog_rebuild(config, session.modifier_picks[:], &session.item_catalog)
 }
 
-// TODO: Introduce events for catch items, etc. to make this manageable
 game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState {
 	screen := game_screen_size()
 
@@ -170,11 +171,12 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	for outcome in item_outcomes {
 		result := game_resolve_item_outcome(session.rules, session.combo, outcome)
 
-		session.score += result.score_delta
+		session.score += u32(result.score_delta)
 		session.combo = result.combo_after
 		session.lives += result.lives_delta
 
-		was_caught := item_outcome_feedback(
+		caught = caught || item_outcome_is_caught(outcome)
+		item_outcome_feedback(
 			config.effects,
 			config.sounds,
 			session.player,
@@ -182,8 +184,6 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 			outcome,
 			result,
 		)
-		caught = caught || was_caught
-
 		modifiers_on_item_outcome(
 			config.modifier_effects,
 			&session.modifiers,
@@ -217,7 +217,7 @@ game_resolve_item_outcome :: proc(
 	switch outcome.kind {
 	case .CaughtGood:
 		summary.score_multiplier = get_multiplier(rules, combo, outcome.item.kind)
-		summary.score_delta = outcome.base_points * summary.score_multiplier
+		summary.score_delta = math.round(f32(outcome.base_points) * summary.score_multiplier)
 		summary.combo_after = combo + 1
 	case .CaughtBad, .MissedGood:
 		summary.combo_after = 0
@@ -237,7 +237,7 @@ item_outcome_feedback :: proc(
 	effects: ^Effects,
 	outcome: ItemOutcome,
 	summary: ItemOutcomeSummary,
-) -> bool {
+) {
 	item_flash_spawn(effects, outcome.item)
 
 	switch outcome.kind {
@@ -250,8 +250,6 @@ item_outcome_feedback :: proc(
 			outcome.base_points,
 			summary.score_multiplier,
 		)
-		return true
-
 	case .CaughtBad:
 		k2.play_sound(sounds.by_kind[.CatchBad])
 		// TODO: Improve position passing (maybe trigger particles somewhere else)
@@ -259,11 +257,8 @@ item_outcome_feedback :: proc(
 		if summary.lives_delta < 0 {
 			effects_set_hit(config, effects, v2 = false)
 		}
-		return true
-
 	case .CaughtNeutral:
 		k2.play_sound(sounds.by_kind[.CatchDull])
-		return true
 
 	case .MissedGood:
 		if summary.lives_delta < 0 {
@@ -274,8 +269,6 @@ item_outcome_feedback :: proc(
 
 	case .MissedOther: // No additional effects
 	}
-
-	return false
 }
 
 @(private = "file")
@@ -354,7 +347,8 @@ game_draw :: proc(config: GameConfig, session: Session) {
 	game_background_draw(config.background)
 	player_draw(session.player, config.player)
 	for &item in session.item_pool.items {
-		item_draw(config.effects, config.items[item.kind], session.rules, item, false)}
+		item_draw(config.items[item.kind], session.rules, item, false)
+	}
 	effects_draw(config, session.rules, session.effects)
 
 	// lives

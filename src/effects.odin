@@ -56,7 +56,7 @@ effects_update :: proc(config: EffectsConfig, player: Player, effects: ^Effects,
 	shake_update(config, effects, dt)
 }
 
-effects_reset :: proc(effects: Effects) {
+effects_restore_camera :: proc(effects: Effects) {
 	if effects.shake_is_active {
 		k2.set_camera(nil)
 	}
@@ -94,7 +94,7 @@ effects_draw :: proc(config: GameConfig, rules: GameRules, effects: Effects) {
 FloatingText :: struct {
 	x, y:       f32,
 	points:     u32,
-	multiplier: u32,
+	multiplier: f32,
 	elapsed:    f32,
 	active:     bool,
 }
@@ -119,7 +119,7 @@ floating_text_spawn :: proc(
 	floating_text_pool: ^[16]FloatingText,
 	pos: k2.Vec2,
 	points: u32,
-	multiplier: u32,
+	multiplier: f32,
 ) {
 	for &spot in floating_text_pool {
 		if !spot.active {
@@ -140,7 +140,7 @@ floating_text_draw :: proc(config: EffectsConfig, floating_text: FloatingText) {
 	if floating_text.multiplier == 1 {
 		text = fmt.tprintf("+%d", floating_text.points)
 	} else {
-		text = fmt.tprintf("+%d x%d", floating_text.points, floating_text.multiplier)
+		text = fmt.tprintf("+%d x%.1f", floating_text.points, floating_text.multiplier)
 	}
 
 	text_width := k2.measure_text(text, config.floating_text_size).x
@@ -197,7 +197,7 @@ item_flash_draw :: proc(
 ) {
 	flashing := int(flashing_item.elapsed * effects_config.flashing_speed) % 2 == 0
 	// TOOD: This is a bit weird
-	item_draw(effects_config, item_config, rules, flashing_item.item, flashing)
+	item_draw(item_config, rules, flashing_item.item, flashing)
 }
 
 shake_update :: proc(config: EffectsConfig, effects: ^Effects, dt: f32) {

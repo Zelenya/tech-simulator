@@ -270,24 +270,14 @@ modifiers_pick :: proc(config: GameConfig, wave: int) -> [3]ModifierKind {
 	return {options[0], options[1], options[2]}
 }
 
-wave_next :: proc(
-	config: GameConfig,
-	session: ^Session,
-	modifier: ModifierKind,
-	dt: f32,
-) -> GameState {
+wave_next :: proc(config: GameConfig, session: ^Session, modifier: ModifierKind) -> GameState {
 	k2.play_sound(config.sounds.by_kind[.WaveNext])
 
 	// TODO: Similar check is duplicate in game loop
 	session.current_wave = min(session.current_wave + 1, len(config.waves) - 1)
 	session.wave_timer = 0
 
-	spawn_interval := config.difficulties[session.difficulty].spawn_interval
-	for wave_index in 1 ..= len(session.modifier_picks) {
-		spawn_interval *= config.waves[wave_index].spawn_multiplier
-	}
-
-	// Record selection, rebuild persistnet rules and catalog, update current runtime state
+	// Record selection, rebuild persistent rules and catalog, update current runtime state
 	append(&session.modifier_picks, modifier)
 	game_session_rebuild(config, session)
 	modifier_activate(config.modifier_effects, &session.modifiers, modifier)

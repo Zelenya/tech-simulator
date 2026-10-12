@@ -70,6 +70,16 @@ ItemOutcome :: struct {
 	base_points: u32,
 }
 
+item_outcome_is_caught :: proc(outcome: ItemOutcome) -> bool {
+	switch outcome.kind {
+	case .CaughtGood, .CaughtBad, .CaughtNeutral:
+		return true
+	case .MissedGood, .MissedOther:
+		return false
+	}
+	unreachable()
+}
+
 ItemCatalog :: struct {
 	by_kind:           map[ItemKind]ItemDef,
 	good:              [dynamic]WeightedItem,
@@ -306,7 +316,6 @@ item_outcome :: proc(
 }
 
 item_draw :: proc(
-	effects_config: EffectsConfig,
 	item_config: ItemConfig,
 	rules: GameRules,
 	item: Item,

@@ -21,7 +21,7 @@
   ],
   "cards": {
     "gap": 50,
-    "sprite": "card-full-test",
+    "sprite": "card",
     "width": 300,
     "height": 500,
     "title_box": {
@@ -39,6 +39,7 @@
     {
       "kind": "easy",
       "label": "2021-2022",
+      "sprite": "difficulty-1",
       "spawn_interval": 0.7,
       "item_speed": 250,
       "max_active": 2,
@@ -47,6 +48,7 @@
     {
       "kind": "medium",
       "label": "2023-2024",
+      "sprite": "difficulty-2",
       "spawn_interval": 0.5,
       "item_speed": 300,
       "max_active": 3,
@@ -55,6 +57,7 @@
     {
       "kind": "hard",
       "label": "2025-2026",
+      "sprite": "difficulty-3",
       "spawn_interval": 0.3,
       "item_speed": 500,
       "max_active": 4,
@@ -141,116 +144,137 @@
     {
       "kind": "prestige",
       "title": "Prestige",
-      "description": "Bonus points for big-name company opportunities."
+      "description": "Bonus points for big-name company opportunities.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "tech-stack",
       "title": "Interesting Tech",
-      "description": "Bonus points for opportunities with a hot tech stack."
+      "description": "Bonus points for opportunities with a hot tech stack.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "compensation",
       "title": "Compensation",
-      "description": "Bonus points for higher-paying opportunities."
+      "description": "Bonus points for higher-paying opportunities.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "remote-work",
       "title": "Remote",
-      "description": "Bonus points for remote-friendly opportunities."
+      "description": "Bonus points for remote-friendly opportunities.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "add-pet-project",
       "title": "Add Pet Project",
-      "description": "Spawn a bonus item every few catches."
+      "description": "Spawn a bonus item every few catches.",
+      "sprite": "effects-pet-project"
     },
     {
       "kind": "ask-for-referral",
       "title": "Ask for Referrals",
-      "description": "Boost jobs matching your preference."
+      "description": "Boost jobs matching your preference.",
+      "sprite": "effects-referral"
     },
     {
       "kind": "file-unemployment",
       "title": "File Unemployment",
-      "description": "Gain an extra life."
+      "description": "Gain an extra life.",
+      "sprite": "effects-unemployment"
     },
     {
       "kind": "give-conference-talk",
       "title": "Give Conference Talk",
-      "description": "Increase catch margin and magnet strength."
+      "description": "Increase catch margin and magnet strength.",
+      "sprite": "effects-conference"
     },
     {
       "kind": "hiring-freeze",
       "title": "Hiring Freeze",
-      "description": "Slow incoming jobs."
+      "description": "Slow incoming jobs.",
+      "sprite": "effects-freeze"
     },
     {
       "kind": "burnout",
       "title": "Burnout",
-      "description": "Items move faster, but points increase."
+      "description": "Items move faster, but points increase.",
+      "sprite": "effects-burnout"
     },
     {
       "kind": "leetcode-grind",
       "title": "LeetCode Grind",
-      "description": "Fewer bad items, but items move erratically."
+      "description": "Fewer bad items, but items move erratically.",
+      "sprite": "effects-grind"
     },
     {
       "kind": "lower-quality-bar",
       "title": "Lower Quality Bar",
-      "description": "More good items, but lose a life."
+      "description": "More good items, but lose a life.",
+      "sprite": "effects-lower-quality"
     },
     {
       "kind": "tighten-cv",
       "title": "Tighten CV",
-      "description": "Fewer good items, but score much higher."
+      "description": "Fewer good items, but score much higher.",
+      "sprite": "effects-tighter-cv"
     },
     {
       "kind": "spray-and-pray",
       "title": "Spray and Pray",
-      "description": "More good items, but score much lower."
+      "description": "More good items, but score much lower.",
+      "sprite": "effects-pray-spray"
     },
     {
       "kind": "automate-pipeline",
       "title": "Automate Pipeline",
-      "description": "Mix fast and slow opportunities."
+      "description": "Mix fast and slow opportunities.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "blind-application",
       "title": "Blind Application",
-      "description": "Hide parts of the application flow."
+      "description": "Hide parts of the application flow.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "give-up",
       "title": "Give Up",
-      "description": "Lose lives over time, become immune to catching and missing items"
+      "description": "Lose lives over time, become immune to catching and missing items",
+      "sprite": "effects-farmer"
     },
     {
       "kind": "recruiter-spam",
       "title": "Recruiter Spam",
-      "description": "Flood the field with distractions."
+      "description": "Flood the field with distractions.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "imposter-syndrome",
       "title": "Imposter Syndrome",
-      "description": "Hide the score."
+      "description": "Hide the score.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "bonus",
       "title": "Accept the Challenge",
-      "description": "Take the final challenge."
+      "description": "Take the final challenge.",
+      "sprite": "item-neutral"
     },
     {
       "kind": "continue",
       "title": "I'm Not Ready",
-      "description": "Keep preparing."
+      "description": "Keep preparing.",
+      "sprite": "item-neutral"
     }
   ],
   "items": [
     {
       "kind": "neutral",
-      "sprite": "test-item-good-call",
+      "sprite": "item-neutral",
       "shape": "rect",
-      "width": 62,
-      "height": 80,
+      "width": 50,
+      "height": 30,
       "weight": 0,
       "is_good": true,
       "points": 0
@@ -267,7 +291,7 @@
     },
     {
       "kind": "call",
-      "sprite": "test-item-good-call",
+      "sprite": "item-good-call",
       "shape": "circle",
       "width": 64,
       "height": 64,

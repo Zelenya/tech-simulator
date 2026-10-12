@@ -96,7 +96,7 @@ main :: proc() {
 			case WaveMenu(ModifierKind):
 				choice, picked := wave_menu_update(ModifierKind, &menu).?
 				if picked {
-					game_state = wave_next(config, &session, choice, dt)
+					game_state = wave_next(config, &session, choice)
 				} else {
 					wave_menu_draw(ModifierKind, config.cards, config.fonts, menu)
 				}
@@ -110,7 +110,7 @@ main :: proc() {
 				game_state = next_state
 			}
 			game_draw(config, session)
-			effects_reset(session.effects)
+			effects_restore_camera(session.effects)
 
 		case .Pause:
 			game_state = pause_update()

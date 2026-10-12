@@ -35,6 +35,9 @@ GameConfig :: struct {
 	attempted_at:     time.Time,
 }
 
+// TODO: Get rid of this, parse directly,
+// we already have to be explicit about each field for validations.
+// This doesn't add much anymore
 GameConfigRaw :: struct {
 	using _:          BaseConfig,
 	background:       []BackgroundPieceConfigRaw,
@@ -94,17 +97,18 @@ DescriptionTextBoxConfig :: struct {
 	height:   f32,
 }
 
-DifficultyConfigData :: struct($Kind: typeid) {
+DifficultyConfigData :: struct($Kind, $Sprite: typeid) {
 	kind:           Kind,
 	label:          string,
+	sprite:         Sprite,
 	spawn_interval: f32,
 	item_speed:     f32,
 	max_active:     u8,
 	lives:          u8,
 }
 
-DifficultyConfigRaw :: DifficultyConfigData(string)
-DifficultyConfig :: DifficultyConfigData(Difficulty)
+DifficultyConfigRaw :: DifficultyConfigData(string, string)
+DifficultyConfig :: DifficultyConfigData(Difficulty, k2.Texture)
 
 EffectsConfig :: struct {
 	flashing_lifetime:                f32,
@@ -188,14 +192,14 @@ ModifierEffectsTuningConfig :: struct {
 	give_conference_talk_magnet_multiplier: f32,
 	hiring_freeze_item_speed_multiplier:    f32,
 	burnout_item_speed_multiplier:          f32,
-	burnout_score_base_multiplier:          u32,
+	burnout_score_base_multiplier:          f32,
 	leet_code_ratio_multiplier:             f32,
 	lower_quality_bar_ratio_multiplier:     f32,
 	lower_quality_bar_lives_delta:          i8,
 	tighten_cv_ratio_multiplier:            f32,
-	tighten_cv_score_base_multiplier:       u32,
+	tighten_cv_score_base_multiplier:       f32,
 	spray_and_pray_ratio_multiplier:        f32,
-	spray_and_pray_score_base_divisor:      u32,
+	spray_and_pray_score_base_divisor:      f32,
 	blind_application_hidden_ratio:         f32,
 	give_up_timer:                          f32,
 	recruiter_spawn_timer:                  f32,
@@ -206,14 +210,15 @@ ModifiersConfig :: struct {
 	by_kind: map[ModifierKind]ModifierConfig,
 }
 
-ModifierConfigData :: struct($Kind: typeid) {
+ModifierConfigData :: struct($Kind, $Sprite: typeid) {
 	kind:        Kind,
 	title:       string,
 	description: string,
+	sprite:      Sprite,
 }
 
-ModifierConfigRaw :: ModifierConfigData(string)
-ModifierConfig :: ModifierConfigData(ModifierKind)
+ModifierConfigRaw :: ModifierConfigData(string, string)
+ModifierConfig :: ModifierConfigData(ModifierKind, k2.Texture)
 
 ItemConfig :: struct {
 	kind:   ItemKind,
@@ -496,11 +501,13 @@ parse_game_config :: proc(
 		game_config_destroy(&config)
 	}
 
+	config.effects = parse_effects_config(raw.effects) or_return
 	config.cards = parse_cards_config(raw.cards) or_return
-	config.difficulties = parse_difficulties_config(allocator, raw.difficulties) or_return
-	config.effects = raw.effects
+	config.difficulties, err = parse_difficulties_config(allocator, raw.difficulties)
+	if err != nil do return config, err
 	config.hud = parse_hud_config(raw.hud) or_return
-	config.modifiers = parse_modifiers_config(allocator, raw.modifiers) or_return
+	config.modifiers, err = parse_modifiers_config(allocator, raw.modifiers)
+	if err != nil do return config, err
 	config.player = parse_player_config(raw.player) or_return
 	config.waves = parse_waves_config(allocator, raw.waves, config.modifiers) or_return
 	config.item_pool = parse_item_pool_config(
@@ -527,6 +534,48 @@ parse_game_config :: proc(
 	config.updated_at = updated_at
 	config.attempted_at = updated_at
 	return config, nil
+}
+
+parse_effects_config :: proc(raw: EffectsConfig) -> (config: EffectsConfig, err: Maybe(string)) {
+	if raw.flashing_lifetime < 0 ||
+	   raw.flashing_speed < 0 ||
+	   raw.full_flash_duration < 0 ||
+	   raw.shake_duration < 0 ||
+	   raw.dust_timer < 0 {
+		return {}, "Invalid effects config: durations and flashing speed must be non-negative"
+	}
+	if raw.floating_text_lifetime <= 0 || raw.particle_lifetime <= 0 {
+		return {}, "Invalid effects config: text and particle lifetimes must be positive"
+	}
+	if raw.particle_lifetime_min_multiplier <= 0 ||
+	   raw.particle_lifetime_min_multiplier > 1 ||
+	   raw.dust_lifetime_min_multiplier <= 0 ||
+	   raw.dust_lifetime_min_multiplier > 1 {
+		return {}, "Invalid effects config: lifetime multipliers must be in (0, 1]"
+	}
+	if raw.particle_speed < 0 ||
+	   raw.shake_strength < 0 ||
+	   raw.dust_x_jitter < 0 ||
+	   raw.dust_y_jitter < 0 {
+		return {},
+			"Invalid effects config: particle speed, shake strength and jitter must be non-negative"
+	}
+	if raw.dust_vx_min_multiplier > raw.dust_vx_max_multiplier ||
+	   raw.dust_vy_min_multiplier > raw.dust_vy_max_multiplier {
+		return {}, "Invalid effects config: dust velocity ranges are reversed"
+	}
+	if raw.floating_text_size < 0 ||
+	   raw.particle_size < 0 ||
+	   raw.particle_size_min_multiplier < 0 ||
+	   raw.dust_size_min_multiplier < 0 ||
+	   raw.dust_size_max_multiplier < 0 {
+		return {}, "Invalid effects config: sizes and size multipliers must be non-negative"
+	}
+	if raw.particle_size_min_multiplier > 1 ||
+	   raw.dust_size_min_multiplier > raw.dust_size_max_multiplier {
+		return {}, "Invalid effects config: size ranges are reversed"
+	}
+	return raw, nil
 }
 
 parse_background_config :: proc(
@@ -602,17 +651,18 @@ parse_difficulties_config :: proc(
 		return {}, "Invalid difficulties config: difficulties must be non-empty"
 	}
 
-	local_configs: [Difficulty]DifficultyConfig
 	seen: [Difficulty]bool
 	for difficulty in raw {
-		parse_difficulty(allocator, &local_configs, &seen, difficulty) or_return
+		err = parse_difficulty(allocator, &configs, &seen, difficulty)
+		if err != nil do return configs, err
 	}
 
 	if !seen[.Easy] || !seen[.Medium] || !seen[.Hard] {
-		return {}, "Invalid difficulties config: easy, medium, and hard difficulties are required"
+		return configs,
+			"Invalid difficulties config: easy, medium, and hard difficulties are required"
 	}
 
-	return local_configs, nil
+	return configs, nil
 }
 
 parse_difficulty :: proc(
@@ -635,10 +685,13 @@ parse_difficulty :: proc(
 		)
 	}
 
+	sprite := load_texture_from(difficulty.sprite) or_return
+	k2.set_texture_filter(sprite, .Point)
 	label := strings.clone(difficulty.label, allocator)
 	configs[kind] = DifficultyConfig {
 		kind           = kind,
 		label          = label,
+		sprite         = sprite,
 		spawn_interval = difficulty.spawn_interval,
 		item_speed     = difficulty.item_speed,
 		max_active     = difficulty.max_active,
@@ -848,9 +901,17 @@ parse_modifiers_config :: proc(
 	}
 
 	by_kind := make(map[ModifierKind]ModifierConfig, allocator)
+	config.by_kind = by_kind
 	for modifier in raw {
-		def := parse_modifier_def(allocator, modifier) or_return
-		if def.kind in by_kind do return {}, fmt.tprintf("Invalid modifier config: duplicate modifier kind '%v'", modifier.kind)
+		def, parse_err := parse_modifier_def(allocator, modifier)
+		if parse_err != nil do return config, parse_err
+		if def.kind in by_kind {
+			k2.destroy_texture(def.sprite)
+			return config, fmt.tprintf(
+				"Invalid modifier config: duplicate modifier kind '%v'",
+				modifier.kind,
+			)
+		}
 		map_insert(&by_kind, def.kind, def)
 	}
 
@@ -869,10 +930,14 @@ parse_modifier_def :: proc(
 		return {}, fmt.tprintf("Invalid modifier config: unknown modifier kind '%v'", raw.kind)
 	}
 
+	sprite := load_texture_from(raw.sprite) or_return
+	k2.set_texture_filter(sprite, .Point)
+
 	return ModifierConfig {
 			kind = kind,
 			title = strings.clone(raw.title, allocator),
 			description = strings.clone(raw.description, allocator),
+			sprite = sprite,
 		},
 		nil
 }
@@ -1275,8 +1340,22 @@ destroy_sounds_config :: proc(config: ^SoundsConfig) {
 	}
 }
 
+destroy_modifiers_config :: proc(config: ^ModifiersConfig) {
+	for _, modifier in config.by_kind {
+		k2.destroy_texture(modifier.sprite)
+	}
+}
+
+destroy_difficulty_configs :: proc(configs: [Difficulty]DifficultyConfig) {
+	for difficulty in configs {
+		k2.destroy_texture(difficulty.sprite)
+	}
+}
+
 game_config_destroy :: proc(game_config: ^GameConfig) {
 	destroy_fonts_config(&game_config.fonts)
+	destroy_modifiers_config(&game_config.modifiers)
+	destroy_difficulty_configs(game_config.difficulties)
 	k2.destroy_texture(game_config.cards.sprite)
 	k2.destroy_texture(game_config.player.sprite)
 	destroy_item_configs(game_config.items)

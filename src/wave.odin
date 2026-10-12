@@ -1,6 +1,7 @@
 package game
 
 import k2 "../karl2d"
+import "core:math"
 import "core:strings"
 
 ActiveWaveMenu :: union {
@@ -17,6 +18,7 @@ WaveMenuCard :: struct($Kind: typeid) {
 	kind:        Kind,
 	title:       string,
 	description: string,
+	sprite:      k2.Texture,
 	card:        k2.Rect,
 }
 
@@ -45,18 +47,21 @@ wave_menu_init :: proc(
 			kind = .Easy,
 			title = difficulties[.Easy].label,
 			description = "",
+			sprite = difficulties[.Easy].sprite,
 			card = settings_card(cards_config, start_x, start_y, int(Difficulty.Easy)),
 		},
 		{
 			kind = .Medium,
 			title = difficulties[.Medium].label,
 			description = "",
+			sprite = difficulties[.Medium].sprite,
 			card = settings_card(cards_config, start_x, start_y, int(Difficulty.Medium)),
 		},
 		{
 			kind = .Hard,
 			title = difficulties[.Hard].label,
 			description = "",
+			sprite = difficulties[.Hard].sprite,
 			card = settings_card(cards_config, start_x, start_y, int(Difficulty.Hard)),
 		},
 	}
@@ -84,6 +89,7 @@ wave_modifier_init :: proc(config: GameConfig, session: Session) -> WaveMenu(Mod
 			kind        = option,
 			title       = def.title,
 			description = def.description,
+			sprite      = def.sprite,
 			card        = to_card(cards_config, start_x, start_y, i),
 		}
 	}
@@ -117,6 +123,7 @@ wave_menu_update :: proc($Kind: typeid, menu: ^WaveMenu(Kind)) -> Maybe(Kind) {
 	return nil
 }
 
+// TODO: change the order: make description central and move image next to the title
 wave_menu_draw :: proc(
 	$Kind: typeid,
 	cards_config: CardsConfig,
@@ -131,7 +138,6 @@ wave_menu_draw :: proc(
 		k2.draw_texture_fit(cards_config.sprite, source, option.card)
 
 		color := k2.GREEN if int(i) == menu.selected else k2.BLACK
-
 		if int(i) == menu.selected {
 			k2.draw_rect_outline(option.card, 5, k2.color_alpha(color, 200))
 		}
@@ -146,13 +152,37 @@ wave_menu_draw :: proc(
 			title_font.font,
 			title_font.size,
 		)
-
 		box_position :=
 			k2.rect_top_left(option.card) +
 			{cards_config.title_box.x_margin, cards_config.title_box.top_y}
 		box_size := k2.Vec2{title_text_width, cards_config.title_box.height}
 		title_pos := box_position + box_size / 2 - title_text_size / 2
 		k2.draw_text(title_text, title_pos, f32(title_font_size), k2.BLACK, title_font.font)
+
+		pic_source := k2.get_texture_rect(option.sprite)
+		pic_top := cards_config.title_box.top_y + cards_config.title_box.height
+		pic_bottom := option.card.h + cards_config.description_box.bottom_y
+		// TODO: Hacky margin, it needs it's own one, or generic one
+		pic_width :=
+			option.card.w -
+			max(cards_config.title_box.x_margin, cards_config.description_box.x_margin) * 2
+		gap: f32 = 20
+		pic_height := pic_bottom - pic_top - (gap * 2)
+		scale := min(pic_width / pic_source.w, pic_height / pic_source.h)
+		// Whole-pixel scaling keeps the illustrations crisp without stretching them.
+		if scale >= 1 do scale = math.floor(scale)
+		// TODO: Need to move this to config (and all the calculations need to be done once anyway)
+		if scale > 0 {
+			width := pic_source.w * scale
+			height := pic_source.h * scale
+			pic_rect := k2.Rect {
+				x = math.floor(option.card.x + (option.card.w - width) / 2),
+				y = math.floor(option.card.y + (pic_top + pic_bottom - height) / 2),
+				w = width,
+				h = height,
+			}
+			k2.draw_texture_fit(option.sprite, pic_source, pic_rect)
+		}
 
 		description_text_width := cards_config.width - cards_config.description_box.x_margin * 2
 		// TODO: Should be done once, not on each draw
@@ -163,7 +193,6 @@ wave_menu_draw :: proc(
 			description_font.font,
 			description_font.size,
 		)
-
 		desc_box_position :=
 			k2.rect_bottom_left(option.card) +
 			{cards_config.description_box.x_margin, cards_config.description_box.bottom_y}
