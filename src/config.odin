@@ -4,6 +4,7 @@ import k2 "../karl2d"
 import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
+import "core:math"
 import "core:os"
 import "core:path/filepath"
 import "core:reflect"
@@ -498,11 +499,15 @@ parse_game_config :: proc(
 	config.cards = parse_cards_config(raw.cards) or_return
 	config.difficulties = parse_difficulties_config(allocator, raw.difficulties) or_return
 	config.effects = raw.effects
-	config.item_pool = parse_item_pool_config(raw.item_pool) or_return
 	config.hud = parse_hud_config(raw.hud) or_return
 	config.modifiers = parse_modifiers_config(allocator, raw.modifiers) or_return
 	config.player = parse_player_config(raw.player) or_return
 	config.waves = parse_waves_config(allocator, raw.waves, config.modifiers) or_return
+	config.item_pool = parse_item_pool_config(
+		raw.item_pool,
+		raw.items,
+		raw.modifier_effects,
+	) or_return
 
 	// These allocate something that needs to be cleaned up in case of failure
 	config.background, err = parse_background_config(allocator, raw.background)
@@ -702,15 +707,43 @@ parse_hud_config :: proc(raw: HudConfigRaw) -> (config: HudConfig, err: Maybe(st
 
 parse_item_pool_config :: proc(
 	raw: ItemPoolConfig,
+	items: []ItemConfigRaw,
+	effects: ModifierEffectsConfigRaw,
 ) -> (
 	config: ItemPoolConfig,
 	err: Maybe(string),
 ) {
-	if raw.good_to_bad_ratio < 0 || raw.good_to_bad_ratio > 1 {
+	if math.is_nan(raw.good_to_bad_ratio) ||
+	   raw.good_to_bad_ratio < 0 ||
+	   raw.good_to_bad_ratio > 1 {
 		return raw, fmt.tprintf(
 			"Invalid item pool config: good_to_bad_ratio must be between 0 and 1, got %v",
 			raw.good_to_bad_ratio,
 		)
+	}
+
+	good_weight, bad_weight: f32
+	for item in items {
+		if math.is_nan(item.weight) || math.is_inf(item.weight) || item.weight < 0 {
+			return raw, fmt.tprintf(
+				"Invalid item config: weight for '%v' must be finite and non-negative",
+				item.kind,
+			)
+		}
+		if !item.is_good {
+			bad_weight += item.weight
+		} else if item.points > 0 {
+			good_weight += item.weight
+		}
+	}
+
+	if good_weight <= 0 || math.is_inf(good_weight) {
+		return raw,
+			"Invalid items config: weighted spawning requires a finite, positive total good-item weight"
+	}
+	if bad_weight <= 0 || math.is_inf(bad_weight) {
+		return raw,
+			"Invalid items config: weighted spawning requires a finite, positive total bad-item weight"
 	}
 	return raw, nil
 }
@@ -722,9 +755,24 @@ parse_modifier_effects_config :: proc(
 	config: ModifierEffectsConfig,
 	err: Maybe(string),
 ) {
-	if .Neutral not_in items {
-		return {}, "Neutral item is missing, but it's required by modifier effects"
+	if raw.spray_and_pray_score_base_divisor == 0 {
+		return {},
+			"Invalid modifier effects config: spray_and_pray_score_base_divisor must be greater than zero"
 	}
+
+	ratio_multipliers := [4]f32 {
+		raw.leet_code_ratio_multiplier,
+		raw.lower_quality_bar_ratio_multiplier,
+		raw.tighten_cv_ratio_multiplier,
+		raw.spray_and_pray_ratio_multiplier,
+	}
+	for multiplier in ratio_multipliers {
+		if math.is_nan(multiplier) || math.is_inf(multiplier) || multiplier < 0 {
+			return {},
+				"Invalid modifier effects config: ratio multipliers must be finite and non-negative"
+		}
+	}
+
 	return ModifierEffectsConfig {
 			prestige_preference_item = parse_modifier_effect_item(
 				items,
@@ -862,6 +910,10 @@ parse_items_config :: proc(
 			def.effect = BadItemCaught{}
 		}
 		map_insert(&by_kind, def.kind, def)
+	}
+
+	if .Neutral not_in by_kind {
+		return nil, "Neutral item is missing, but it's required"
 	}
 
 	return by_kind, nil
