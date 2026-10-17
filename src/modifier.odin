@@ -240,9 +240,10 @@ modifier_activate :: proc(
 	modifiers: ^ModifierSystem,
 	modifier: ModifierKind,
 ) {
+	// Ongoing behavior
+	modifier_runtime_init(modifiers, modifier)
+	// One-off effects
 	#partial switch modifier {
-	case .AddPetProject:
-		append(&modifiers.runtime, PetProjectModifier{catches = 0})
 	case .FileUnemployment:
 		queue.push_back(
 			&modifiers.pending,
@@ -254,11 +255,18 @@ modifier_activate :: proc(
 			&modifiers.pending,
 			ChangeLivesAction{delta = effects.lower_quality_bar_lives_delta},
 		)
+	}
+}
+
+// Ongoing behavior
+modifier_runtime_init :: proc(modifiers: ^ModifierSystem, modifier: ModifierKind) {
+	#partial switch modifier {
+	case .AddPetProject:
+		append(&modifiers.runtime, PetProjectModifier{catches = 0})
 	case .GiveUp:
 		append(&modifiers.runtime, GiveUpModifier{elapsed = 0})
 	case .RecruiterSpam:
 		append(&modifiers.runtime, RecruiterSpamModifier{cooldown = 0, elapsed = 0})
-	case .Continue: // noop
 	}
 }
 

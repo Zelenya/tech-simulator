@@ -1218,62 +1218,58 @@ sound_kind_from_string :: proc(raw: string) -> Maybe(SoundKind) {
 	return nil
 }
 
+@(private = "file")
+DIFFICULTY_NAMES := [Difficulty]string {
+	.Easy   = "easy",
+	.Medium = "medium",
+	.Hard   = "hard",
+}
+
 difficulty_from_string :: proc(raw: string) -> Maybe(Difficulty) {
-	switch raw {
-	case "easy":
-		return .Easy
-	case "medium":
-		return .Medium
-	case "hard":
-		return .Hard
+	for name, difficulty in DIFFICULTY_NAMES {
+		if name == raw do return difficulty
 	}
 	return nil
 }
 
+difficulty_to_string :: proc(difficulty: Difficulty) -> string {
+	return DIFFICULTY_NAMES[difficulty]
+}
+
+@(private = "file")
+MODIFIER_NAMES := [ModifierKind]string {
+	.Prestige           = "prestige",
+	.TechStack          = "tech-stack",
+	.Compensation       = "compensation",
+	.RemoteWork         = "remote-work",
+	.AddPetProject      = "add-pet-project",
+	.AskForReferral     = "ask-for-referral",
+	.HiringFreeze       = "hiring-freeze",
+	.FileUnemployment   = "file-unemployment",
+	.GiveConferenceTalk = "give-conference-talk",
+	.Burnout            = "burnout",
+	.LeetCodeGrind      = "leetcode-grind",
+	.LowerQualityBar    = "lower-quality-bar",
+	.TightenCV          = "tighten-cv",
+	.SprayAndPray       = "spray-and-pray",
+	.AutomatePipeline   = "automate-pipeline",
+	.BlindApplication   = "blind-application",
+	.GiveUp             = "give-up",
+	.RecruiterSpam      = "recruiter-spam",
+	.ImposterSyndrome   = "imposter-syndrome",
+	.Bonus              = "bonus",
+	.Continue           = "continue",
+}
+
+modifier_kind_to_string :: proc(kind: ModifierKind) -> string {
+	return MODIFIER_NAMES[kind]
+}
+
 modifier_kind_from_string :: proc(raw: string) -> Maybe(ModifierKind) {
-	switch raw {
-	case "prestige":
-		return .Prestige
-	case "tech-stack":
-		return .TechStack
-	case "compensation":
-		return .Compensation
-	case "remote-work":
-		return .RemoteWork
-	case "add-pet-project":
-		return .AddPetProject
-	case "ask-for-referral":
-		return .AskForReferral
-	case "hiring-freeze":
-		return .HiringFreeze
-	case "file-unemployment":
-		return .FileUnemployment
-	case "give-conference-talk":
-		return .GiveConferenceTalk
-	case "burnout":
-		return .Burnout
-	case "leetcode-grind":
-		return .LeetCodeGrind
-	case "lower-quality-bar":
-		return .LowerQualityBar
-	case "tighten-cv":
-		return .TightenCV
-	case "spray-and-pray":
-		return .SprayAndPray
-	case "automate-pipeline":
-		return .AutomatePipeline
-	case "blind-application":
-		return .BlindApplication
-	case "give-up":
-		return .GiveUp
-	case "recruiter-spam":
-		return .RecruiterSpam
-	case "imposter-syndrome":
-		return .ImposterSyndrome
-	case "bonus":
-		return .Bonus
-	case "continue":
-		return .Continue
+	for name, kind in MODIFIER_NAMES {
+		if name == raw {
+			return kind
+		}
 	}
 	return nil
 }

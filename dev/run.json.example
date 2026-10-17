@@ -1,0 +1,10 @@
+{
+  "difficulty": "easy",
+  "modifier_picks": [
+    "prestige",
+    "add-pet-project"
+  ],
+  "lives": 5,
+  "score": 0,
+  "elapsed_seconds": 0
+}

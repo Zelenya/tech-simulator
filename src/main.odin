@@ -2,6 +2,7 @@ package game
 
 import k2 "../karl2d"
 import "core:fmt"
+@(require) import "core:os"
 
 main :: proc() {
 	k2.init(WINDOW_WIDTH, WINDOW_HEIGHT, "Don't forget to drink some water")
@@ -15,6 +16,15 @@ main :: proc() {
 	game_state := GameState.WaveMenu
 	session: Session
 	wave_menu: ActiveWaveMenu = wave_menu_init(config.cards, config.difficulties)
+
+	when ODIN_DEBUG {
+		debug_session, loaded := debug_session_init(memory, config).?
+		if loaded {
+			fmt.printfln("Loaded a game session from snapshot")
+			session = debug_session
+			game_state = .Playing
+		}
+	}
 
 	for k2.update() {
 		dt := k2.get_frame_time()
@@ -117,7 +127,7 @@ main :: proc() {
 			pause_draw(session)
 
 		case .GameOver:
-			next_state := gameover_update()
+			next_state := gameover_update(session)
 			if next_state == .WaveMenu {
 				enter_difficulty_menu(config, &wave_menu, &game_state)
 			} else {
@@ -135,6 +145,7 @@ main :: proc() {
 	k2.shutdown()
 }
 
+@(private = "file")
 enter_difficulty_menu :: proc(
 	config: GameConfig,
 	wave_menu: ^ActiveWaveMenu,
@@ -144,6 +155,7 @@ enter_difficulty_menu :: proc(
 	game_state^ = .WaveMenu
 }
 
+@(private = "file")
 enter_modifier_menu :: proc(
 	config: GameConfig,
 	session: Session,
@@ -152,4 +164,22 @@ enter_modifier_menu :: proc(
 ) {
 	wave_menu^ = wave_modifier_init(config, session)
 	game_state^ = .WaveMenu
+}
+
+when ODIN_DEBUG {
+	debug_session_init :: proc(memory: AppMemory, config: GameConfig) -> Maybe(Session) {
+		if !os.is_file(DEV_SNAPSHOT_PATH) do return nil
+		snapshot, snapshot_err := snapshot_load(DEV_SNAPSHOT_PATH)
+		if snapshot_err != nil {
+			fmt.eprintln(snapshot_err)
+			return nil
+		}
+		defer delete(snapshot.modifier_picks)
+		session, session_err := game_session_from_snapshot(memory.session, config, snapshot)
+		if session_err != nil {
+			fmt.eprintln(session_err)
+			return nil
+		}
+		return session
+	}
 }

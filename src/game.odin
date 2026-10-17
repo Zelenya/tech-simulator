@@ -99,6 +99,7 @@ Session :: struct {
 	lives:          i8,
 	current_wave:   int,
 	wave_timer:     f32,
+	elapsed_time:   f32,
 }
 
 game_init :: proc(
@@ -127,6 +128,50 @@ game_init :: proc(
 		lives          = cast(i8)settings.lives,
 		current_wave   = 0,
 		wave_timer     = 0,
+		elapsed_time   = 0,
+	}
+}
+
+when ODIN_DEBUG {
+	game_session_from_snapshot :: proc(
+		allocator: runtime.Allocator,
+		config: GameConfig,
+		snapshot: Snapshot,
+	) -> (
+		session: Session,
+		err: Maybe(string),
+	) {
+		if snapshot.lives <= 0 {
+			return {}, fmt.tprintf("Snapshot requires positive lives, got %v", snapshot.lives)
+		}
+		if len(snapshot.modifier_picks) >= len(config.waves) {
+			return {}, fmt.tprintf("Snapshot requires %v waves, but config has %v", len(snapshot.modifier_picks) + 1, len(config.waves))
+		}
+
+		session = game_init(allocator, config, snapshot.difficulty)
+		append(&session.modifier_picks, ..snapshot.modifier_picks)
+		session.score = snapshot.score
+		session.lives = snapshot.lives
+		session.current_wave = len(snapshot.modifier_picks)
+		session.elapsed_time = snapshot.elapsed_seconds
+		game_session_rebuild(config, &session)
+		// Note: This is different from "normal" hot reload, but might want to unify later
+		session.item_pool.spawn_cooldown = session.rules.item_spawn_interval
+		for modifier in snapshot.modifier_picks {
+			modifier_runtime_init(&session.modifiers, modifier)
+		}
+
+		return session, nil
+	}
+
+	game_snapshot_from_session :: proc(session: Session) -> Snapshot {
+		return Snapshot {
+			difficulty = session.difficulty,
+			modifier_picks = session.modifier_picks[:],
+			score = session.score,
+			lives = session.lives,
+			elapsed_seconds = session.elapsed_time,
+		}
 	}
 }
 
@@ -141,6 +186,7 @@ game_update :: proc(config: GameConfig, session: ^Session, dt: f32) -> GameState
 	if k2.key_went_down(.Escape) do return GameState.Pause
 
 	session.wave_timer += dt
+	session.elapsed_time += dt
 	// Make progress (clamp it to X waves to be reasonable... for now)
 	if session.wave_timer > config.waves[session.current_wave].duration &&
 	   session.current_wave < len(config.waves) - 1 {
